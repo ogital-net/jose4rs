@@ -50,7 +50,7 @@ pub struct JsonWebSignature<'a> {
 }
 
 impl<'a> JsonWebSignature<'a> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
             key: None,
@@ -931,6 +931,12 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         algorithm_constraints: &'a AlgorithmConstraints<AlgorithmIdentifier>,
     ) {
         self.algorithm_constraints = algorithm_constraints;
+    }
+}
+
+impl<'a> Default for JsonWebSignature<'a> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
