@@ -297,7 +297,7 @@ impl JsonWebKeyGenerator {
                     Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
                 }
                 _ => {
-                    return Err(JoseError::InvalidAlgorithm(
+                    Err(JoseError::InvalidAlgorithm(
                         "Unsupported algorithm for key generation".into(),
                     ))
                 }

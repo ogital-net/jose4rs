@@ -96,7 +96,7 @@ impl ContentEncryptionAlgorithm {
     fn decrypt_aes_hmac<'a>(
         &self,
         alg: HmacAlgorithm,
-        mut ciphertext: &'a mut [u8],
+        ciphertext: &'a mut [u8],
         aad: &[u8],
         content_encryption_key: &[u8],
         iv: &[u8],
@@ -104,7 +104,7 @@ impl ContentEncryptionAlgorithm {
     ) -> Result<&'a [u8], JoseError> {
         let mut ctx = AesHmacAeadCtx::init(alg, content_encryption_key);
         let l = ctx
-            .decrypt(iv, aad, &mut ciphertext, authentication_tag)?
+            .decrypt(iv, aad, ciphertext, authentication_tag)?
             .len();
         Ok(&ciphertext[..l])
     }
@@ -132,14 +132,14 @@ impl ContentEncryptionAlgorithm {
     fn decrypt_aead<'a>(
         &self,
         alg: AeadAlgorithm,
-        mut ciphertext: &'a mut [u8],
+        ciphertext: &'a mut [u8],
         aad: &[u8],
         content_encryption_key: &[u8],
         iv: &[u8],
         authentication_tag: &[u8],
     ) -> Result<&'a [u8], JoseError> {
         let ctx = EvpAeadCtx::init(alg, content_encryption_key);
-        ctx.decrypt(iv, aad, &mut ciphertext, authentication_tag)?;
+        ctx.decrypt(iv, aad, ciphertext, authentication_tag)?;
 
         Ok(ciphertext)
     }

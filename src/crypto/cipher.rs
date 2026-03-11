@@ -132,7 +132,7 @@ impl EvpCipherCtx {
             )));
         }
 
-        if ciphertext.len() % algorithm.block_len() != 0 {
+        if !ciphertext.len().is_multiple_of(algorithm.block_len()) {
             return Err(JoseError::new(format!(
                 "ciphertext length not multiple of {}",
                 algorithm.block_len()

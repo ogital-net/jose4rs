@@ -373,7 +373,7 @@ impl JwtConsumer {
 
         if let Some(expected_issuers) = &self.expected_issuers {
             if let Some(issuer) = issuer {
-                if !expected_issuers.is_empty() && !expected_issuers.contains(&issuer.to_string()) {
+                if !expected_issuers.is_empty() && !expected_issuers.iter().any(|exp| exp.as_str() == issuer) {
                     return Err(InvalidJwtError::with_error_code(
                         format!("Issuer '{}' is not expected", issuer),
                         ErrorCode::IssuerInvalid,
@@ -412,7 +412,7 @@ impl JwtConsumer {
 
                 // Check if any expected audience matches
                 if !expected_audiences.is_empty() {
-                    let has_match = audience.iter().any(|aud| expected_audiences.contains(aud));
+                    let has_match = audience.iter().any(|aud| expected_audiences.iter().any(|exp| exp.as_str() == aud.as_str()));
                     if !has_match {
                         return Err(InvalidJwtError::with_error_code(
                             "No expected audience found in JWT",
@@ -449,7 +449,7 @@ impl JwtConsumer {
 
         if let Some(expected_subject) = &self.expected_subject {
             if let Some(subject) = subject {
-                if subject != expected_subject {
+                if subject != expected_subject.as_str() {
                     return Err(InvalidJwtError::with_error_code(
                         format!(
                             "Subject '{}' does not match expected '{}'",
@@ -482,6 +482,7 @@ impl JwtConsumer {
     fn validate_time_claims(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
         let eval_time = self.evaluation_time.unwrap_or_else(SystemTime::now);
         let eval_secs = eval_time.duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let clock_skew_secs = self.allowed_clock_skew.as_secs();
 
         let mut errors = Vec::new();
 
@@ -490,14 +491,14 @@ impl JwtConsumer {
             let exp_secs = exp.duration_since(UNIX_EPOCH).unwrap().as_secs();
 
             // Check if expired (token is expired at or after the exp time)
-            if exp_secs + self.allowed_clock_skew.as_secs() <= eval_secs {
+            if exp_secs + clock_skew_secs <= eval_secs {
                 errors.push(ErrorCode::Expired);
             }
 
             // Check if expiration is too far in the future
             if let Some(max_future_validity) = self.max_future_validity {
                 let max_exp = eval_secs + max_future_validity.as_secs();
-                if exp_secs > max_exp + self.allowed_clock_skew.as_secs() {
+                if exp_secs > max_exp + clock_skew_secs {
                     errors.push(ErrorCode::ExpirationTooFarInFuture);
                 }
             }
@@ -509,7 +510,7 @@ impl JwtConsumer {
         if let Some(nbf) = claims.get_not_before() {
             let nbf_secs = nbf.duration_since(UNIX_EPOCH).unwrap().as_secs();
 
-            if nbf_secs > eval_secs + self.allowed_clock_skew.as_secs() {
+            if nbf_secs > eval_secs + clock_skew_secs {
                 errors.push(ErrorCode::NotYetValid);
             }
         } else if self.require_not_before {

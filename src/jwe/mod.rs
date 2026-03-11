@@ -234,8 +234,8 @@ impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> 
     }
 
     fn get_payload(&mut self) -> Result<&[u8], JoseError> {
-        if self.plaintext.is_some() {
-            return Ok(self.plaintext.unwrap().get(&self.buffer));
+        if let Some(plain) = self.plaintext {
+            return Ok(plain.get(&self.buffer));
         }
 
         self.decrypt()

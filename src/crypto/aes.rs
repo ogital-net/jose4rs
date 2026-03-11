@@ -53,7 +53,7 @@ pub(crate) fn wrap_key(aes_key: &[u8], iv: Option<&[u8]>, src: &[u8]) -> Box<[u8
 }
 
 pub(crate) fn wrap_key_buf(aes_key: &[u8], iv: Option<&[u8]>, src: &[u8], dst: &mut [u8]) -> usize {
-    assert!(src.len() % 8 == 0);
+    assert!(src.len().is_multiple_of(8));
     assert!(dst.len() >= src.len() + 8);
 
     let aes_key = AesKey::for_encryption(aes_key);
@@ -84,7 +84,7 @@ pub(crate) fn unwrap_key_buf(
     src: &[u8],
     dst: &mut [u8],
 ) -> usize {
-    assert!(src.len() % 8 == 0 && src.len() > 8);
+    assert!(src.len().is_multiple_of(8) && src.len() > 8);
     assert!(dst.len() >= src.len() - 8);
 
     let aes_key = AesKey::for_decryption(aes_key);
