@@ -8,10 +8,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use simd_json::{
     base::{ValueAsScalar, Writable},
     derived::{MutableObject, ValueObjectAccessAsArray, ValueObjectAccessAsScalar},
+    prelude::ValueObjectAccess,
     ValueBuilder as _,
 };
 
 use crate::error::JoseError;
+
+mod consumer;
+pub use consumer::{ErrorCode, InvalidJwtError, JwtConsumer, JwtConsumerBuilder};
+
+#[cfg(test)]
+#[path = "consumer_tests.rs"]
+mod consumer_tests;
 
 const EXPIRATION_TIME: &str = "exp";
 const NOT_BEFORE: &str = "nbf";
@@ -121,11 +129,22 @@ impl JwtClaims {
     ///
     /// A vector of audience values if present, `None` otherwise.
     pub fn get_audience(&self) -> Option<Vec<String>> {
-        self.claims_map.get_array(AUDIENCE).map(|arr| {
-            arr.iter()
-                .map(|v| v.as_str().unwrap().to_string())
-                .collect()
-        })
+        // Try to get the "aud" field
+        let aud_value = self.claims_map.get(AUDIENCE)?;
+        
+        // Check if it's a string (single audience)
+        if let Some(s) = aud_value.as_str() {
+            return Some(vec![s.to_string()]);
+        }
+        
+        // Check if it's an array (multiple audiences)
+        if let Some(arr) = self.claims_map.get_array(AUDIENCE) {
+            return Some(arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect());
+        }
+        
+        None
     }
 
     /// Sets the audience (`aud`) claim.
