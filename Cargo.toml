@@ -1,0 +1,101 @@
+[package]
+name = "jose4rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "A Rust implementation of the JOSE standards (JWS, JWE, JWK, JWT), ported from the Java jose4j library."
+license = "BSD-2-Clause"
+repository = "https://github.com/ogital-net/jose4rs"
+homepage = "https://github.com/ogital-net/jose4rs"
+documentation = "https://docs.rs/jose4rs"
+readme = "README.md"
+keywords = ["jose", "jwt", "jws", "jwe", "jwk"]
+categories = ["cryptography", "web-programming", "authentication", "parser-implementations"]
+# Explicit include list: only what belongs in the published crate. Anything not
+# matched here is excluded from `cargo package` / `cargo publish`, so new
+# top-level files never leak into the release by accident.
+include = [
+    "src/**/*.rs",
+    "examples/**/*.rs",
+    "benches/**/*.rs",
+    "tests/**/*.rs",
+    "tests/**/*.txt",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+]
+
+[dependencies]
+aws-lc-sys = { version = ">=0.40, <2", optional = true }
+base64 = { version = "0", optional = true }
+base64-simd = { version = "0", optional = true }
+boring-sys = { version = "4", optional = true }
+# No default backend: the `zip` feature selects `miniz_oxide` (safe, pure Rust).
+# A downstream crate can override the backend (e.g. `zlib-rs`, `zlib-ng`) by
+# depending on flate2 with that feature; Cargo unifies it onto this build.
+flate2 = { version = "1", default-features = false, optional = true }
+memchr = "2"
+simd-json = { version = "0.18", default-features = false, features = [
+    "runtime-detection",
+] }
+
+[features]
+default = ["aws-lc", "base64-simd"]
+
+aws-lc = ["aws-lc-sys"]
+boring = ["boring-sys"]
+
+# DEFLATE (`zip: DEF`, RFC 1951) compression of the JWE plaintext, per RFC 7516
+# Section 4.1.3. Enables the pure-Rust miniz_oxide backend; override the flate2
+# backend from the consuming crate to use a faster/zlib-compatible impl.
+zip = ["flate2/miniz_oxide"]
+
+# HTTPS JWKS fetching. `jwks-https` provides the cache core and a blocking
+# fetch trait (bring your own transport). `jwks-https-async` adds a native
+# async fetch trait for use from async runtimes such as tokio; it implies
+# `jwks-https`. Neither pulls in an HTTP client or async runtime.
+jwks-https = []
+jwks-https-async = ["jwks-https"]
+
+# Pedantic clippy is enabled workspace-wide; the lints below are opted out.
+# The FFI casts are dominated by aws-lc / boring wrappers (C `c_int` returns,
+# length casts, raw-pointer conversions), where the casts are intentional and
+# SAFETY-documented; the rest are stylistic preferences we don't enforce.
+# This mirrors the per-crate list in `src/lib.rs` and applies it uniformly to
+# examples, benches, and tests (which don't inherit inner `#![allow]`s).
+[lints.clippy]
+# The group must sit at a lower priority than the individual overrides below
+# (priority -1) so the specific `allow`s win over the `pedantic` warn.
+pedantic = { level = "warn", priority = -1 }
+# Stylistic preferences we don't enforce.
+similar_names = "allow"
+
+[dev-dependencies]
+biscuit = "0.8.0"
+chrono = "0.4.45"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+dhat = "0"
+josekit = "0.10.3"
+jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+ring = "0.17.14"
+serde = { version = "1.0.229", features = ["derive"] }
+
+[[example]]
+name = "jwks_https"
+required-features = ["jwks-https"]
+
+[[bench]]
+name = "jwt_comparison"
+harness = false
+
+[[bench]]
+name = "jwe_comparison"
+harness = false
+
+[[bench]]
+name = "jwt_validation"
+harness = false
+
+[[bench]]
+name = "jws_headers"
+harness = false

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  test:
+    name: Build & test (stable, ${{ matrix.os }})
+    # Run on both Linux and macOS. The Rust code paths are identical, but the
+    # crypto backends (aws-lc-sys, boring-sys) have platform-specific C/asm
+    # build paths, so a green macOS run gives confidence the FFI builds and
+    # all tests pass off-Linux too.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --all-targets --verbose
+      - run: cargo test --all-targets --verbose
+      - run: cargo test --doc --verbose
+
+  # The crate has two mutually-exclusive cryptography backends (aws-lc,
+  # default, and boring) plus independent optional features (zip, jwks-https,
+  # jwks-https-async). `--all-features` would enable both backends at once and
+  # fail the compile_error! guard, so exercise the meaningful combinations
+  # explicitly instead.
+  features:
+    name: Feature combinations
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        args:
+          # Default backend with every add-on feature (but not boring).
+          - "--features zip,jwks-https,jwks-https-async"
+          # BoringSSL backend with the same add-ons.
+          - "--no-default-features --features boring,base64-simd,zip,jwks-https,jwks-https-async"
+          # aws-lc with the portable (non-SIMD) base64 path.
+          - "--no-default-features --features aws-lc,base64"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --verbose ${{ matrix.args }}
+
+  msrv:
+    name: Build on MSRV (1.88)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@v2
+      # `--locked` honors the committed Cargo.lock so the MSRV job doesn't
+      # transitively pick up a newer dependency that requires a higher
+      # toolchain than 1.88.  `--lib` excludes benchmarks and examples whose
+      # dev-dependencies may require a newer compiler.
+      - run: cargo check --lib --locked --verbose
+
+  lint:
+    name: Format & clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      # Lint the default feature set and the full aws-lc add-on set; both must
+      # stay warning-free under the workspace pedantic lints.
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets --features zip,jwks-https,jwks-https-async -- -D warnings
+
+  docs:
+    name: Rustdoc
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --features zip,jwks-https,jwks-https-async
+
+  package:
+    name: Package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Dry-run packaging so the explicit `include` list is exercised on every
+      # PR; catches stray files before they reach crates.io.
+      - run: cargo package --list
