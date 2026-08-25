@@ -3,6 +3,7 @@
 //! This module provides types and methods for working with JWT claims as defined in
 //! [RFC 7519](https://tools.ietf.org/html/rfc7519).
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use simd_json::{
@@ -72,14 +73,39 @@ macro_rules! with_value {
 
 /// Holds either an owned or a buffer-borrowing parsed JSON value.
 ///
-/// In the `Borrowed` variant, `value` references data inside `_buf`. It is
-/// declared first so that Rust drops it before `_buf`.
+/// In the `Borrowed` variant, `value` references data inside the
+/// `Arc<[u8]>` held by `buf`. `Arc<[u8]>` stores the slice header and
+/// the data bytes contiguously in a single allocation; we hand simd-json
+/// a `&mut [u8]` into that allocation's data slot to parse in place, so
+/// `value`'s `Cow<str>` pointers point directly into the Arc's bytes.
+/// A cloned `JwtClaims` keeps the same allocation alive (refcount bump),
+/// so the pointers stay valid for as long as any clone exists. The
+/// `value` field is declared first so Rust drops it before `buf`.
 enum ClaimsInner {
     Owned(simd_json::OwnedValue),
     Borrowed {
         value: simd_json::BorrowedValue<'static>,
-        _buf: Box<[u8]>,
+        buf: Arc<[u8]>,
     },
+}
+
+impl Clone for ClaimsInner {
+    fn clone(&self) -> Self {
+        match self {
+            // Deep clone of the owned DOM (recurses through Box<Vec> /
+            // Box<Object>). The cloned `OwnedValue` is fully detached.
+            Self::Owned(v) => Self::Owned(v.clone()),
+            // Shallow clone of the borrowed DOM: `BorrowedValue`'s derived
+            // `Clone` bumps the refcounts of the inner `Box<Vec<...>>`s
+            // and copies each `Cow<str>` header (pointer + length). The
+            // string pointers stay valid because `buf` is `Arc<[u8]>`:
+            // both clones keep the underlying bytes alive.
+            Self::Borrowed { value, buf } => Self::Borrowed {
+                value: value.clone(),
+                buf: buf.clone(),
+            },
+        }
+    }
 }
 
 impl std::fmt::Debug for ClaimsInner {
@@ -164,13 +190,24 @@ impl JwtClaims {
     /// let json = r#"{"iss":"example.com","sub":"user123"}"#;
     /// let claims = JwtClaims::parse(json).unwrap();
     /// ```
+    #[allow(clippy::missing_panics_doc)]
     pub fn parse(json: impl AsRef<[u8]>) -> Result<Self, JoseError> {
-        let mut buf = Box::from(json.as_ref());
-        // SAFETY: `buf` is heap-allocated (stable address) and stored in
-        // `ClaimsInner::Borrowed`. `value` is declared before `_buf` so Rust
-        // drops it first. We never expose `&mut` to `buf` after parsing.
-        let value: simd_json::BorrowedValue<'_> =
-            simd_json::to_borrowed_value(&mut buf).map_err(JoseError::json)?;
+        // Build a single allocation: `Arc<[u8]>::from(&[u8])` allocates
+        // `ArcInner<[u8]>` whose layout is `{strong, weak, len, bytes}`
+        // contiguously, copying the input bytes into the data slot.
+        // The Arc is uniquely owned (strong count = 1) right after
+        // construction, so `Arc::get_mut` returns `Some(&mut [u8])`
+        // pointing into the Arc's data slot. simd-json parses in place;
+        // its `BorrowedValue`'s `Cow<str>` pointers then point directly
+        // into the Arc's storage. After the mutable borrow ends we never
+        // write to those bytes again, so the pointers stay valid for
+        // every `JwtClaims` clone that holds this Arc.
+        let mut arc: Arc<[u8]> = Arc::from(json.as_ref());
+        let value: simd_json::BorrowedValue<'_> = {
+            let bytes: &mut [u8] =
+                Arc::get_mut(&mut arc).expect("Arc just constructed; strong count is 1");
+            simd_json::to_borrowed_value(bytes).map_err(JoseError::json)?
+        };
         let value: simd_json::BorrowedValue<'static> = unsafe { std::mem::transmute(value) };
         if !value.is_object() {
             return Err(JoseError::InvalidJson(
@@ -178,7 +215,7 @@ impl JwtClaims {
             ));
         }
         Ok(Self {
-            inner: ClaimsInner::Borrowed { value, _buf: buf },
+            inner: ClaimsInner::Borrowed { value, buf: arc },
         })
     }
 
@@ -612,6 +649,27 @@ impl JwtClaims {
 impl Default for JwtClaims {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for JwtClaims {
+    /// Returns an independent clone. Reads see the same claims; writes
+    /// to one clone do not affect the other.
+    ///
+    /// Cloning a freshly-parsed (Borrowed) `JwtClaims` is cheap: the
+    /// underlying JSON buffer is shared via `Arc<[u8]>` (single allocation,
+    /// header + data contiguous), so the only per-clone work is a refcount
+    /// bump and a shallow copy of the `BorrowedValue`'s inner `Cow` / `Box`
+    /// refcounts.
+    ///
+    /// Cloning an Owned `JwtClaims` deep-copies the DOM (proportional to
+    /// the payload size). Mutating either clone is local: only the
+    /// mutating clone promotes itself back to `Owned` on the next
+    /// `set_*` call.
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 
@@ -1307,6 +1365,89 @@ mod tests {
         assert!(claims.subject().is_none());
         assert!(claims.audience().is_none());
         assert!(claims.jwt_id().is_none());
+    }
+
+    #[test]
+    fn test_clone_of_borrowed_is_independent() {
+        // A cloned Borrowed claims shares the underlying JSON buffer with
+        // the original. Mutating the clone must promote only the clone to
+        // Owned, leaving the original's view of the parsed JSON unchanged.
+        let original = JwtClaims::parse(r#"{"iss":"original","sub":"user123"}"#).unwrap();
+        let mut cloned = original.clone();
+
+        assert_eq!(cloned.issuer(), Some("original"));
+        assert_eq!(original.issuer(), Some("original"));
+
+        // Mutate only the clone.
+        cloned.set_issuer("mutated");
+
+        // The clone sees the new value.
+        assert_eq!(cloned.issuer(), Some("mutated"));
+        // The original still reads from the shared buffer (or its own
+        // Owned snapshot after ensure_owned), and must still see the
+        // original issuer. This is the key correctness check for the
+        // Arc<[u8]> aliasing story.
+        assert_eq!(original.issuer(), Some("original"));
+    }
+
+    #[test]
+    fn test_clone_of_owned_is_independent() {
+        let mut original = JwtClaims::new();
+        original.set_issuer("original");
+        let mut cloned = original.clone();
+
+        cloned.set_issuer("mutated");
+
+        assert_eq!(cloned.issuer(), Some("mutated"));
+        assert_eq!(original.issuer(), Some("original"));
+    }
+
+    #[test]
+    fn test_clone_preserves_all_claim_types() {
+        // Round-trips through clone without losing claim structure.
+        let json = r#"{"iss":"https://idp.example.com","sub":"user123","aud":["a","b"],"exp":1700000000,"nbf":1699999000,"iat":1699999500,"jti":"abc","groups":["g1","g2"],"custom":"value"}"#;
+        let original = JwtClaims::parse(json).unwrap();
+        let cloned = original.clone();
+
+        assert_eq!(cloned.issuer(), Some("https://idp.example.com"));
+        assert_eq!(cloned.subject(), Some("user123"));
+        assert_eq!(
+            cloned.audience(),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(cloned.jwt_id(), Some("abc"));
+        assert_eq!(
+            cloned
+                .expiration_time()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            1700000000
+        );
+        assert_eq!(
+            cloned
+                .not_before()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            1699999000
+        );
+        assert_eq!(
+            cloned
+                .issued_at()
+                .unwrap()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            1699999500
+        );
+        assert_eq!(cloned.string_claim("custom"), Some("value"));
+        assert_eq!(
+            cloned.string_array_claim("groups"),
+            Some(vec!["g1".to_string(), "g2".to_string()])
+        );
     }
 
     #[test]
