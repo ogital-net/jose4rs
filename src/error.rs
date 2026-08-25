@@ -81,8 +81,8 @@ pub enum JoseError {
 
     /// The JOSE compact-serialization wire format is malformed (wrong number
     /// of `.`-separated parts, missing required JSON member, malformed
-    /// signing input, ...). Distinct from [`InvalidHeader`] (header content
-    /// inside an otherwise well-shaped token) and [`InvalidJson`] (the JSON
+    /// signing input, ...). Distinct from [`InvalidHeader`](JoseError::InvalidHeader) (header content
+    /// inside an otherwise well-shaped token) and [`InvalidJson`](JoseError::InvalidJson) (the JSON
     /// itself didn't parse).
     MalformedToken(String),
 
@@ -91,7 +91,7 @@ pub enum JoseError {
     IntegrityError(String),
 
     /// A JWKS fetch failed at the transport layer (network error, non-2xx
-    /// HTTP status, DNS failure, ...). Distinguishable from [`InvalidJson`],
+    /// HTTP status, DNS failure, ...). Distinguishable from [`InvalidJson`](JoseError::InvalidJson),
     /// which covers a JWKS that was fetched but had a malformed body.
     JwksFetch(String),
 
