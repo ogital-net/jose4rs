@@ -18,7 +18,7 @@ use simd_json::{
 use crate::error::JoseError;
 
 mod consumer;
-pub use consumer::{ErrorCode, InvalidJwtError, JwtConsumer, JwtConsumerBuilder};
+pub use consumer::{ErrorCode, InvalidJwtError, JwtConsumer, JwtConsumerBuilder, JwtValidator};
 
 #[cfg(test)]
 #[path = "consumer_tests.rs"]

@@ -1,11 +1,11 @@
-// Comprehensive tests ported from jose4j JwtConsumerTest.java
+// Comprehensive tests for JwtConsumer and ErrorCode behaviour.
 
 #[cfg(test)]
 mod jwt_consumer_tests {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use crate::jwt::consumer::ErrorCode;
-    use crate::jwt::{JwtClaims, JwtConsumerBuilder};
+    use crate::jwt::{InvalidJwtError, JwtClaims, JwtConsumerBuilder};
 
     /// Test basic audience validation with single value
     #[test]
@@ -265,7 +265,7 @@ mod jwt_consumer_tests {
     }
 
     /// Missing required time claims use specific error codes, and exp cannot
-    /// precede iat/nbf (jose4j `NumericDateValidator` consistency checks).
+    /// precede iat/nbf (consistency checks on time claims).
     #[test]
     fn time_claim_missing_codes_and_consistency() {
         let claims = r#"{"sub":"x"}"#;
@@ -274,15 +274,15 @@ mod jwt_consumer_tests {
             .set_require_expiration_time()
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::ExpirationMissing));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_MISSING));
 
         let consumer = JwtConsumerBuilder::new().set_require_not_before().build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::NotBeforeMissing));
+        assert!(err.has_error_code(ErrorCode::NOT_BEFORE_MISSING));
 
         let consumer = JwtConsumerBuilder::new().set_require_issued_at().build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::IssuedAtMissing));
+        assert!(err.has_error_code(ErrorCode::ISSUED_AT_MISSING));
 
         // exp before iat
         let consumer = JwtConsumerBuilder::new()
@@ -291,13 +291,13 @@ mod jwt_consumer_tests {
         let err = consumer
             .process_to_claims(r#"{"iat":1430602000,"exp":1430601500}"#)
             .unwrap_err();
-        assert!(err.has_error_code(ErrorCode::ExpirationBeforeIssuedAt));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_BEFORE_ISSUED_AT));
 
         // exp before nbf
         let err = consumer
             .process_to_claims(r#"{"nbf":1430602000,"exp":1430601500}"#)
             .unwrap_err();
-        assert!(err.has_error_code(ErrorCode::ExpirationBeforeNotBefore));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE));
 
         // consistent exp >= iat and nbf passes
         assert!(consumer
@@ -499,7 +499,7 @@ mod jwt_consumer_tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         use crate::jwt::consumer::ErrorCode;
-        assert!(err.has_error_code(ErrorCode::AudienceInvalid));
+        assert!(err.has_error_code(ErrorCode::AUDIENCE_INVALID));
 
         // Test issuer invalid
         let mut claims = JwtClaims::new();
@@ -518,7 +518,7 @@ mod jwt_consumer_tests {
         let result = consumer.process_to_claims(&claims);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.has_error_code(ErrorCode::IssuerInvalid));
+        assert!(err.has_error_code(ErrorCode::ISSUER_INVALID));
 
         // Test multiple errors
         let mut claims = JwtClaims::new();
@@ -538,9 +538,9 @@ mod jwt_consumer_tests {
         let result = consumer.process_to_claims(&claims);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.has_error_code(ErrorCode::IssuerInvalid));
-        assert!(err.has_error_code(ErrorCode::AudienceInvalid));
-        assert!(err.has_error_code(ErrorCode::ExpirationTooFarInFuture));
+        assert!(err.has_error_code(ErrorCode::ISSUER_INVALID));
+        assert!(err.has_error_code(ErrorCode::AUDIENCE_INVALID));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE));
     }
 
     /// Negative `exp` must be treated as expired, not wrapped to a far-future time.
@@ -551,7 +551,7 @@ mod jwt_consumer_tests {
             .set_evaluation_time_from_seconds(1430602000)
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::Expired));
+        assert!(err.has_error_code(ErrorCode::EXPIRED));
     }
 
     /// A non-integer `exp`/`nbf`/`iat` (float, string, oversized)
@@ -572,8 +572,32 @@ mod jwt_consumer_tests {
                 .process_to_claims(claims)
                 .expect_err("expected rejection");
             assert!(
-                err.has_error_code(ErrorCode::MalformedClaim),
+                err.has_error_code(ErrorCode::MALFORMED_CLAIM),
                 "expected MalformedClaim for {claims}, got {:?}",
+                err.error_codes()
+            );
+        }
+    }
+
+    /// Claims that fail to parse as JSON must surface `JSON_INVALID`
+    /// (the `From<JoseError>` impl translates `JoseError::InvalidJson`
+    /// into an `InvalidJwtError` carrying the recognisable code).
+    #[test]
+    fn invalid_json_surfaces_json_invalid_code() {
+        let consumer = JwtConsumerBuilder::new().build();
+
+        for malformed in [
+            "not json at all",
+            r#"{"unterminated":"string"#,
+            r"[1, 2, 3]",      // not a JSON object
+            r#"{"exp": NaN}"#, // bare identifier
+        ] {
+            let err = consumer
+                .process_to_claims(malformed)
+                .expect_err("expected JSON parse failure");
+            assert!(
+                err.has_error_code(ErrorCode::JSON_INVALID),
+                "expected JSON_INVALID for {malformed:?}, got {:?}",
                 err.error_codes()
             );
         }
@@ -590,7 +614,7 @@ mod jwt_consumer_tests {
             .set_allowed_clock_skew(Duration::from_secs(30))
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::ExpirationTooFarInFuture));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE));
     }
 
     /// `aud` with non-string members or a wrong type is malformed,
@@ -610,7 +634,7 @@ mod jwt_consumer_tests {
                 .process_to_claims(claims)
                 .expect_err("expected rejection");
             assert!(
-                err.has_error_code(ErrorCode::AudienceInvalid),
+                err.has_error_code(ErrorCode::AUDIENCE_INVALID),
                 "expected AudienceInvalid for {claims}, got {:?}",
                 err.error_codes()
             );
@@ -625,7 +649,7 @@ mod jwt_consumer_tests {
             .set_expected_audience(true, false, &["expected"])
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::AudienceMissing));
+        assert!(err.has_error_code(ErrorCode::AUDIENCE_MISSING));
     }
 
     /// Strict audience mode requires a raw string, not a single-element array.
@@ -636,7 +660,7 @@ mod jwt_consumer_tests {
             .set_expected_audience(true, true, &["expected"])
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::AudienceInvalid));
+        assert!(err.has_error_code(ErrorCode::AUDIENCE_INVALID));
 
         // ...but a plain string passes strict mode.
         let claims = r#"{"aud":"expected"}"#;
@@ -659,7 +683,7 @@ mod jwt_consumer_tests {
             .build();
         let claims = r#"{"sub":"x","exp":-200}"#;
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::Expired));
+        assert!(err.has_error_code(ErrorCode::EXPIRED));
     }
 
     /// A present-but-non-string `iss` is rejected as malformed when
@@ -671,6 +695,159 @@ mod jwt_consumer_tests {
             .set_expected_issuer("issuer.example.com")
             .build();
         let err = consumer.process_to_claims(claims).unwrap_err();
-        assert!(err.has_error_code(ErrorCode::IssuerInvalid));
+        assert!(err.has_error_code(ErrorCode::ISSUER_INVALID));
+    }
+
+    // ---------------------------------------------------------------
+    // register_validator / JwtValidator tests
+    // ---------------------------------------------------------------
+
+    /// Closure-as-validator: a custom validator using `ErrorCode::custom`
+    /// can enforce a protocol-specific claim (here: OIDC-style `nonce`
+    /// equality) and the consumer surfaces the code via `has_error_code`.
+    #[test]
+    fn register_validator_closure_matches_nonce() {
+        const NONCE_MISSING: ErrorCode = ErrorCode::custom(-1001);
+        const NONCE_MISMATCH: ErrorCode = ErrorCode::custom(-1002);
+
+        let expected = "abc123".to_string();
+
+        let consumer = JwtConsumerBuilder::new()
+            .register_validator(
+                move |claims: &JwtClaims| match claims.string_claim("nonce") {
+                    Some(n) if n == expected => Ok(()),
+                    Some(_) => Err(InvalidJwtError::with_error_code(
+                        "nonce does not match expected value",
+                        NONCE_MISMATCH,
+                    )),
+                    None => Err(InvalidJwtError::with_error_code(
+                        "nonce claim is required but missing",
+                        NONCE_MISSING,
+                    )),
+                },
+            )
+            .build();
+
+        // Nonce matches -> Ok
+        assert!(consumer.process_to_claims(r#"{"nonce":"abc123"}"#).is_ok());
+
+        // Nonce present but wrong -> custom mismatch code
+        let err = consumer
+            .process_to_claims(r#"{"nonce":"wrong"}"#)
+            .unwrap_err();
+        assert!(err.has_error_code(NONCE_MISMATCH));
+        assert!(!err.has_error_code(NONCE_MISSING));
+
+        // Nonce absent -> custom missing code
+        let err = consumer.process_to_claims(r#"{"sub":"x"}"#).unwrap_err();
+        assert!(err.has_error_code(NONCE_MISSING));
+        assert!(!err.has_error_code(NONCE_MISMATCH));
+    }
+
+    /// A custom validator's failure coexists with a built-in validator's
+    /// failure in the same `InvalidJwtError` — the codes are accumulated,
+    /// not short-circuited.
+    #[test]
+    fn register_validator_accumulates_with_default_failures() {
+        const CUSTOM: ErrorCode = ErrorCode::custom(-2001);
+
+        let consumer = JwtConsumerBuilder::new()
+            .set_expected_issuer("real-issuer")
+            .set_require_expiration_time()
+            .register_validator(|claims: &JwtClaims| {
+                if claims.string_claim("c_hash").is_some() {
+                    Ok(())
+                } else {
+                    Err(InvalidJwtError::with_error_code(
+                        "c_hash claim is required",
+                        CUSTOM,
+                    ))
+                }
+            })
+            .build();
+
+        let err = consumer
+            .process_to_claims(r#"{"iss":"wrong"}"#)
+            .unwrap_err();
+        // Default issuer failure surfaces alongside the custom c_hash failure.
+        assert!(err.has_error_code(ErrorCode::ISSUER_INVALID));
+        assert!(err.has_error_code(ErrorCode::EXPIRATION_MISSING));
+        assert!(err.has_error_code(CUSTOM));
+    }
+
+    /// `skip_all_default_validators` does NOT skip custom validators;
+    /// only `skip_all_validators` short-circuits past them.
+    #[test]
+    fn skip_all_default_validators_still_runs_custom_validators() {
+        const CUSTOM: ErrorCode = ErrorCode::custom(-3001);
+
+        let consumer = JwtConsumerBuilder::new()
+            .set_expected_issuer("real-issuer")
+            .set_skip_all_default_validators()
+            .register_validator(|_: &JwtClaims| {
+                Err(InvalidJwtError::with_error_code("custom failed", CUSTOM))
+            })
+            .build();
+
+        let err = consumer.process_to_claims(r"{}").unwrap_err();
+        assert!(err.has_error_code(CUSTOM));
+        // Default issuer failure did not surface because defaults were skipped.
+        assert!(!err.has_error_code(ErrorCode::ISSUER_INVALID));
+    }
+
+    /// `skip_all_validators` DOES skip custom validators too (they are
+    /// validators after all).
+    #[test]
+    fn skip_all_validators_skips_custom_validators() {
+        const CUSTOM: ErrorCode = ErrorCode::custom(-4001);
+
+        let consumer = JwtConsumerBuilder::new()
+            .set_expected_issuer("real-issuer")
+            .set_skip_all_validators()
+            .register_validator(|_: &JwtClaims| {
+                Err(InvalidJwtError::with_error_code("custom failed", CUSTOM))
+            })
+            .build();
+
+        assert!(consumer.process_to_claims(r#"{"iss":"wrong"}"#).is_ok());
+    }
+
+    /// `ErrorCode::custom` enforces the negative-integer convention at
+    /// the API edge.
+    #[test]
+    #[should_panic(expected = "ErrorCode::custom requires a negative i32")]
+    fn error_code_custom_rejects_positive() {
+        let _ = ErrorCode::custom(42);
+    }
+
+    /// A `Box<dyn JwtValidator>` (named impl) works alongside closures.
+    /// Confirms the trait is object-safe and the blanket impl isn't the
+    /// only path.
+    #[test]
+    fn register_validator_trait_object_works() {
+        let consumer = JwtConsumerBuilder::new()
+            .register_validator(RequireCHash)
+            .build();
+        assert!(consumer.process_to_claims(r#"{"c_hash":"abc"}"#).is_ok());
+
+        let err = consumer.process_to_claims(r"{}").unwrap_err();
+        assert!(err.has_error_code(ErrorCode::custom(-5001)));
+    }
+
+    /// Named `JwtValidator` impl used by
+    /// `register_validator_trait_object_works` to confirm trait-object
+    /// dispatch works alongside the closure blanket impl.
+    struct RequireCHash;
+
+    impl crate::jwt::JwtValidator for RequireCHash {
+        fn validate(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+            match claims.string_claim("c_hash") {
+                Some(_) => Ok(()),
+                None => Err(InvalidJwtError::with_error_code(
+                    "c_hash is required",
+                    ErrorCode::custom(-5001),
+                )),
+            }
+        }
     }
 }

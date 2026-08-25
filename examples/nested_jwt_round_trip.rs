@@ -159,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if e.has_expired() {
                 println!("JWT expired: {e}");
             }
-            if e.has_error_code(ErrorCode::AudienceInvalid) {
+            if e.has_error_code(ErrorCode::AUDIENCE_INVALID) {
                 println!("JWT had wrong audience: {e}");
             }
             println!("Invalid JWT! {e}");
