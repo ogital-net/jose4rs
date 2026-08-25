@@ -87,6 +87,35 @@ impl JsonWebKeySet {
     /// equal the key's corresponding field exactly (a key missing that field
     /// never matches a `Some` criterion). This mirrors jose4j's
     /// `JsonWebKeySet.findJsonWebKey`.
+    ///
+    /// # When to use this vs. `VerificationJwkSelector`
+    ///
+    /// `find_key` is a **strict equality match** -- it does *not* verify that
+    /// the key type (`kty`) is compatible with any algorithm, that the key is
+    /// declared for signature use, or that the curve matches. It is suitable
+    /// for ad-hoc inspection of a JWKS and for low-level filtering where you
+    /// already know what you're looking for.
+    ///
+    /// For **verifying a JWS signature against a JWKS** (the common OIDC
+    /// ID-token case), use [`super::VerificationJwkSelector`] instead:
+    ///
+    /// ```no_run
+    /// # use jose4rs::jwk::{JsonWebKeySet, VerificationJwkSelector};
+    /// # let jwks: JsonWebKeySet = unreachable!();
+    /// # let jws_kid: Option<&str> = None;
+    /// # let jws_alg: &str = "RS256";
+    /// let selector = VerificationJwkSelector::new();
+    /// if let Some(jwk) = selector.select(jws_kid, jws_alg, jwks.keys()) {
+    ///     // pass `jwk.public_key()` to the JWS verifier
+    /// }
+    /// ```
+    ///
+    /// `VerificationJwkSelector` enforces that the key's `kty` matches the
+    /// algorithm's required key type (the algorithm-confusion defense),
+    /// narrows by curve for EC keys, and matches `use: "sig"` if the JWK
+    /// declares one. It does **not** by itself try-verify to disambiguate
+    /// when multiple keys share a `kid`; rely on
+    /// `JsonWebSignature::verify_signature` for the final go/no-go.
     pub fn find_key(
         &self,
         key_id: Option<&str>,

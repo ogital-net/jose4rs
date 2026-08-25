@@ -11,7 +11,7 @@
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use super::{JsonWebKey, JsonWebKeySet};
+use super::{JsonWebKey, JsonWebKeySet, VerificationJwkSelector};
 use crate::error::JoseError;
 
 /// The default cache lifetime, used when the response carries no usable
@@ -267,6 +267,10 @@ impl HttpsJwks {
     /// the cooldown hasn't elapsed, the current (possibly stale) cache is
     /// returned without fetching. If `kid` is `None`, this is just [`keys`](Self::keys).
     ///
+    /// For the common OIDC case where you have both a `kid` and an `alg`,
+    /// [`select_verification_key`](Self::select_verification_key) does the
+    /// `keys_with_refresh` + selector dance in one call.
+    ///
     /// # Errors
     ///
     /// Returns an error if the fetch fails and no stale keys are retained.
@@ -291,6 +295,38 @@ impl HttpsJwks {
             *last = Some(Instant::now());
         }
         self.force_refresh()
+    }
+
+    /// Selects a JWS verification key from the JWKS for a JWS with the given
+    /// `kid` and `alg` header values.
+    ///
+    /// This is the one-call OIDC ID-token path: it triggers a cache-refreshing
+    /// fetch on a `kid` miss (the key-rotation case), then runs a
+    /// [`VerificationJwkSelector`] over the result. The selector enforces that
+    /// the key's `kty` is compatible with `alg` (the algorithm-confusion
+    /// defense), narrows by curve for EC algorithms, and matches `use: "sig"`
+    /// if the JWK declares one. Returns the single best candidate, or `None`
+    /// if no key matches.
+    ///
+    /// Pass `kid = None` when the JWS has no `kid` header; the selector will
+    /// then consider every key in the JWKS (still filtered by `alg`/kty/use).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JWKS fetch fails and no stale keys are retained.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal lock is poisoned.
+    pub fn select_verification_key(
+        &self,
+        kid: Option<&str>,
+        alg: &str,
+    ) -> Result<Option<JsonWebKey>, JoseError> {
+        let keys = self.keys_with_refresh(kid)?;
+        Ok(VerificationJwkSelector::new()
+            .select(kid, alg, &keys)
+            .cloned())
     }
 
     /// Returns the key whose `kid` matches, refreshing once on a miss.
@@ -627,5 +663,35 @@ mod tests {
         let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
         jwks.keys_with_refresh(None).unwrap();
         assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[test]
+    fn test_select_verification_key_matches_alg_and_kid() {
+        let fetcher = Arc::new(MockFetcher::new(FetchResponse::new(jwks_body())));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Happy path: kid matches, alg matches the EC P-256 key.
+        let selected = jwks
+            .select_verification_key(Some("the key"), "ES256")
+            .unwrap();
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().key_id(), Some("the key"));
+
+        // Wrong alg: selector rejects because the EC key's kty is incompatible
+        // with RS256. This is the algorithm-confusion defense.
+        let wrong_alg = jwks
+            .select_verification_key(Some("the key"), "RS256")
+            .unwrap();
+        assert!(wrong_alg.is_none());
+
+        // Wrong kid: no match.
+        let wrong_kid = jwks
+            .select_verification_key(Some("other"), "ES256")
+            .unwrap();
+        assert!(wrong_kid.is_none());
+
+        // No kid: still matches by alg.
+        let no_kid = jwks.select_verification_key(None, "ES256").unwrap();
+        assert!(no_kid.is_some());
     }
 }
