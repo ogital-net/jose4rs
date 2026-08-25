@@ -45,12 +45,12 @@ pub type FetchFuture<'a> = std::pin::Pin<
 /// impl AsyncJwksFetcher for MyFetcher {
 ///     fn fetch<'a>(&'a self, url: &'a str) -> FetchFuture<'a> {
 ///         Box::pin(async move {
-///             let resp = self.client.get(url).send().await.map_err(|e| JoseError::General(e.to_string()))?;
+///             let resp = self.client.get(url).send().await.map_err(|e| JoseError::JwksFetch(e.to_string()))?;
 ///             let cache_control = resp.headers().get("cache-control")
 ///                 .and_then(|v| v.to_str().ok()).map(str::to_owned);
 ///             let expires = resp.headers().get("expires")
 ///                 .and_then(|v| v.to_str().ok()).map(str::to_owned);
-///             let body = resp.bytes().await.map_err(|e| JoseError::General(e.to_string()))?.to_vec();
+///             let body = resp.bytes().await.map_err(|e| JoseError::JwksFetch(e.to_string()))?.to_vec();
 ///             Ok(FetchResponse { body, cache_control, expires })
 ///         })
 ///     }

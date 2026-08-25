@@ -55,9 +55,7 @@ impl TryFrom<&str> for Curve {
             "P-521" => Ok(Curve::P521),
             #[cfg(not(feature = "boring"))]
             "secp256k1" => Ok(Curve::Secp256k1),
-            _ => Err(JoseError::invalid_key(format!(
-                "unsupported curve: {value}"
-            ))),
+            _ => Err(JoseError::InvalidKey(format!("unsupported curve: {value}"))),
         }
     }
 }
@@ -134,8 +132,8 @@ impl EcPoint {
         };
         if res != 1 {
             unsafe { EC_POINT_free(ptr) };
-            return Err(JoseError::invalid_key(
-                "EC public point is not on the curve",
+            return Err(JoseError::InvalidKey(
+                "EC public point is not on the curve".into(),
             ));
         }
         Ok(Self(ptr))
@@ -191,8 +189,8 @@ impl EcKey {
         // different curve group; off-curve points were already rejected above.
         let res = unsafe { EC_KEY_set_public_key(self.as_mut_ptr(), point.as_ptr()) };
         if res != 1 {
-            return Err(JoseError::invalid_key(
-                "invalid EC public key (point at infinity or curve mismatch)",
+            return Err(JoseError::InvalidKey(
+                "invalid EC public key (point at infinity or curve mismatch)".into(),
             ));
         }
         Ok(())
@@ -201,7 +199,7 @@ impl EcKey {
     pub(crate) fn set_priv_key(&mut self, mut d: BigNum) -> Result<(), JoseError> {
         let res = unsafe { EC_KEY_set_private_key(self.as_mut_ptr(), d.as_mut_ptr()) };
         if res != 1 {
-            return Err(JoseError::invalid_key("invalid EC private key"));
+            return Err(JoseError::InvalidKey("invalid EC private key".into()));
         }
         Ok(())
     }
@@ -211,7 +209,7 @@ impl EcKey {
         if res == 1 {
             Ok(())
         } else {
-            Err(JoseError::invalid_key("invalid EC key"))
+            Err(JoseError::InvalidKey("invalid EC key".into()))
         }
     }
 

@@ -137,20 +137,20 @@ pub(crate) fn check_crit(
     let Some(crit) = header.get("crit") else {
         return Ok(());
     };
-    let arr = crit
-        .as_array()
-        .ok_or_else(|| JoseError::new("JOSE 'crit' header parameter must be an array"))?;
+    let arr = crit.as_array().ok_or_else(|| {
+        JoseError::InvalidHeader("JOSE 'crit' header parameter must be an array".into())
+    })?;
     if arr.is_empty() {
-        return Err(JoseError::new(
-            "JOSE 'crit' header parameter must not be empty",
+        return Err(JoseError::InvalidHeader(
+            "JOSE 'crit' header parameter must not be empty".into(),
         ));
     }
     for name in arr {
-        let name = name
-            .as_str()
-            .ok_or_else(|| JoseError::new("JOSE 'crit' entries must be strings"))?;
+        let name = name.as_str().ok_or_else(|| {
+            JoseError::InvalidHeader("JOSE 'crit' entries must be strings".into())
+        })?;
         if !supported.contains(&name) {
-            return Err(JoseError::new(format!(
+            return Err(JoseError::InvalidHeader(format!(
                 "unsupported critical header extension '{name}' listed in 'crit'"
             )));
         }

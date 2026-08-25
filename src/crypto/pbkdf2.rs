@@ -19,7 +19,9 @@ pub(crate) fn pbkdf2_hmac(
     let salt = salt.as_ref();
 
     if iterations == 0 {
-        return Err(JoseError::new("PBKDF2 iteration count must be positive"));
+        return Err(JoseError::InvalidAlgorithm(
+            "PBKDF2 iteration count must be positive".to_string(),
+        ));
     }
 
     let mut out = super::mem::new_boxed_slice(out_len);

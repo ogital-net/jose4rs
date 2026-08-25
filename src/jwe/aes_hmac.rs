@@ -30,11 +30,18 @@ impl AesHmacAeadCtx {
     ) -> Result<&'a [u8], JoseError> {
         let alg_key_len = self.algorithm.key_len();
         if self.key.len() != alg_key_len {
-            return Err(JoseError::new("key length mismatch"));
+            return Err(JoseError::InvalidKey(format!(
+                "key length mismatch: expected {alg_key_len}, got {}",
+                self.key.len()
+            )));
         }
 
         if tag.len() != self.algorithm.tag_length() {
-            return Err(JoseError::new("tag length mismatch"));
+            return Err(JoseError::InvalidKey(format!(
+                "tag length mismatch: expected {}, got {}",
+                self.algorithm.tag_length(),
+                tag.len()
+            )));
         }
 
         // https://www.rfc-editor.org/rfc/rfc7518.html#section-5.2.2
@@ -81,7 +88,11 @@ impl AesHmacAeadCtx {
         tag: &[u8],
     ) -> Result<&'a [u8], JoseError> {
         if self.key.len() != self.algorithm.key_len() {
-            return Err(JoseError::new("key length mismatch"));
+            return Err(JoseError::InvalidKey(format!(
+                "key length mismatch: expected {}, got {}",
+                self.algorithm.key_len(),
+                self.key.len()
+            )));
         }
 
         // https://www.rfc-editor.org/rfc/rfc7518.html#section-5.2.2
@@ -103,11 +114,17 @@ impl AesHmacAeadCtx {
         let m = mac(self.algorithm, mac_key, aad, iv, in_out, &al, &mut mac_buf)?;
 
         if tag.len() != self.algorithm.tag_length() {
-            return Err(JoseError::new("tag length mismatch"));
+            return Err(JoseError::InvalidKey(format!(
+                "tag length mismatch: expected {}, got {}",
+                self.algorithm.tag_length(),
+                tag.len()
+            )));
         }
 
         if !crypto_memcmp(tag, &m[..tag.len()]) {
-            return Err(JoseError::new("tag mismatch"));
+            return Err(JoseError::IntegrityError(
+                "JWE authentication tag mismatch".into(),
+            ));
         }
 
         // The value E is decrypted and the PKCS #7 padding is checked and

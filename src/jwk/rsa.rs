@@ -131,7 +131,9 @@ impl RsaJsonWebKey {
     pub fn from_pem(pem: impl AsRef<str>) -> Result<Self, JoseError> {
         match super::JsonWebKey::from_pem(pem)? {
             super::JsonWebKey::Rsa(jwk) => Ok(jwk),
-            _ => Err(JoseError::invalid_key("PEM does not contain an RSA key")),
+            _ => Err(JoseError::InvalidKey(
+                "PEM does not contain an RSA key".into(),
+            )),
         }
     }
 
@@ -166,8 +168,8 @@ impl RsaJsonWebKey {
     fn from_x509_cert(cert: &X509Cert) -> Result<Self, JoseError> {
         let pkey = cert.public_key()?;
         if pkey.key_type() != EvpPkeyType::Rsa {
-            return Err(JoseError::invalid_key(
-                "certificate public key is not an RSA key",
+            return Err(JoseError::InvalidKey(
+                "certificate public key is not an RSA key".into(),
             ));
         }
         let mut jwk = Self::from_evp_pkey(pkey);

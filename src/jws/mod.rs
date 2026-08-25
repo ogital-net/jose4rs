@@ -36,9 +36,9 @@ const MIN_RSA_KEY_BITS: usize = 2048;
 fn header_b64_flag(header: &simd_json::owned::Value) -> Result<bool, JoseError> {
     let b64 = match header.get("b64") {
         None => return Ok(true),
-        Some(v) => v
-            .as_bool()
-            .ok_or_else(|| JoseError::new("JWS 'b64' header parameter must be a boolean"))?,
+        Some(v) => v.as_bool().ok_or_else(|| {
+            JoseError::InvalidHeader("JWS 'b64' header parameter must be a boolean".into())
+        })?,
     };
     if b64 {
         return Ok(true);
@@ -51,8 +51,8 @@ fn header_b64_flag(header: &simd_json::owned::Value) -> Result<bool, JoseError> 
     if crit_ok {
         Ok(false)
     } else {
-        Err(JoseError::new(
-            "JWS 'b64=false' requires 'crit' to list \"b64\" (RFC 7797)",
+        Err(JoseError::InvalidHeader(
+            "JWS 'b64=false' requires 'crit' to list \"b64\" (RFC 7797)".into(),
         ))
     }
 }
@@ -618,7 +618,7 @@ impl<'a> JsonWebSignature<'a> {
     fn get_algorithm(&self, check_constraints: bool) -> Result<AlgorithmIdentifier, JoseError> {
         let alg = self
             .header(HeaderParameter::Algorithm)
-            .ok_or_else(|| JoseError::new("missing algorithm in header"))?;
+            .ok_or_else(|| JoseError::InvalidHeader("missing algorithm in header".into()))?;
         let alg = AlgorithmIdentifier::try_from(alg)?;
         if check_constraints {
             self.algorithm_constraints.check_constraint(alg)?;
@@ -745,7 +745,9 @@ impl<'a> JsonWebSignature<'a> {
         // A JWS protected header must be a JSON object; rejecting anything else
         // here keeps `set_header_name` (which inserts into the map) infallible.
         if !header.is_object() {
-            return Err(JoseError::new("JWS protected header is not a JSON object"));
+            return Err(JoseError::InvalidHeader(
+                "JWS protected header is not a JSON object".into(),
+            ));
         }
 
         // RFC 7515 Section 4.1.11: reject unsupported critical extensions. The only
@@ -824,7 +826,7 @@ impl<'a> JsonWebSignature<'a> {
             let dot = stored
                 .iter()
                 .position(|&b| b == b'.')
-                .ok_or_else(|| JoseError::new("malformed verification input"))?;
+                .ok_or_else(|| JoseError::MalformedToken("malformed verification input".into()))?;
             out.extend_from_slice(&stored[..dot]);
         } else {
             let header = self
@@ -874,10 +876,16 @@ impl<'a> JsonWebSignature<'a> {
         let mut json: Box<[u8]> = Box::from(json_serialization.as_ref());
         let value = simd_json::to_borrowed_value(&mut json).map_err(JoseError::json)?;
         if value.contains_key("header") {
-            return Err(JoseError::new("unprotected header not supported"));
+            return Err(JoseError::InvalidHeader(
+                "unprotected header not supported".into(),
+            ));
         }
         let protected_header = value.get_str("protected").map_or_else(
-            || Err(JoseError::new("invalid JWS, no 'protected' member")),
+            || {
+                Err(JoseError::MalformedToken(
+                    "invalid JWS, no 'protected' member".into(),
+                ))
+            },
             |s| Ok(s.as_bytes()),
         )?;
         // The payload member is required for a normal (b64) JWS. It may be
@@ -885,7 +893,11 @@ impl<'a> JsonWebSignature<'a> {
         // payload the caller supplies via `set_detached_payload`.
         let encoded_payload: Option<&[u8]> = value.get_str("payload").map(str::as_bytes);
         let encoded_signature = value.get_str("signature").map_or_else(
-            || Err(JoseError::new("invalid JWS, no 'signature' member")),
+            || {
+                Err(JoseError::MalformedToken(
+                    "invalid JWS, no 'signature' member".into(),
+                ))
+            },
             |s| Ok(s.as_bytes()),
         )?;
 
@@ -901,7 +913,9 @@ impl<'a> JsonWebSignature<'a> {
             (Some(p), _) => p,
             (None, false) => b"", // detached payload
             (None, true) => {
-                return Err(JoseError::new("invalid JWS, no 'payload' member"));
+                return Err(JoseError::MalformedToken(
+                    "invalid JWS, no 'payload' member".into(),
+                ));
             }
         };
 
@@ -1052,11 +1066,11 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
             for idx in &mut indexes {
                 match iter.next() {
                     Some(i) => *idx = i,
-                    None => return Err(JoseError::new("not enough parts")),
+                    None => return Err(JoseError::MalformedToken("not enough parts".into())),
                 }
             }
             if iter.next().is_some() {
-                return Err(JoseError::new("too many parts"));
+                return Err(JoseError::MalformedToken("too many parts".into()));
             }
             indexes
         };
@@ -1096,8 +1110,8 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         if !self.payload_is_b64 {
             // RFC 7797 Section 8: an unencoded payload can contain '.', which is not
             // representable in compact serialization. ACME uses flattened JSON.
-            return Err(JoseError::new(
-                "b64=false is not supported in compact serialization; use flattened JSON",
+            return Err(JoseError::InvalidHeader(
+                "b64=false is not supported in compact serialization; use flattened JSON".into(),
             ));
         }
 

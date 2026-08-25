@@ -43,7 +43,7 @@ impl EvpCipherCtx {
         }
 
         if key.len() != algorithm.key_len() {
-            return Err(JoseError::invalid_key(format!(
+            return Err(JoseError::InvalidKey(format!(
                 "invalid key length '{}', expected '{}'",
                 key.len(),
                 algorithm.key_len()
@@ -51,7 +51,7 @@ impl EvpCipherCtx {
         }
 
         if iv.len() != algorithm.iv_len() {
-            return Err(JoseError::invalid_key(format!(
+            return Err(JoseError::InvalidKey(format!(
                 "invalid IV length '{}', expected '{}'",
                 iv.len(),
                 algorithm.iv_len()
@@ -113,7 +113,7 @@ impl EvpCipherCtx {
         }
 
         if key.len() != algorithm.key_len() {
-            return Err(JoseError::invalid_key(format!(
+            return Err(JoseError::InvalidKey(format!(
                 "invalid key length '{}', expected '{}'",
                 key.len(),
                 algorithm.key_len()
@@ -121,7 +121,7 @@ impl EvpCipherCtx {
         }
 
         if iv.len() != algorithm.iv_len() {
-            return Err(JoseError::invalid_key(format!(
+            return Err(JoseError::InvalidKey(format!(
                 "invalid IV length '{}', expected '{}'",
                 iv.len(),
                 algorithm.iv_len()
@@ -129,7 +129,7 @@ impl EvpCipherCtx {
         }
 
         if !ciphertext.len().is_multiple_of(algorithm.block_len()) {
-            return Err(JoseError::new(format!(
+            return Err(JoseError::InvalidKey(format!(
                 "ciphertext length not multiple of {}",
                 algorithm.block_len()
             )));
@@ -168,7 +168,7 @@ impl EvpCipherCtx {
                 ciphertext.as_mut_ptr().add(end),
                 &mut written,
             ) {
-                return Err(JoseError::invalid_key("decryption failed"));
+                return Err(JoseError::InvalidKey("decryption failed".into()));
             }
             end += written as usize;
         }

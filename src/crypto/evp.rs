@@ -92,7 +92,7 @@ impl TryFrom<i32> for EvpPkeyType {
             EVP_PKEY_X25519 => Ok(EvpPkeyType::X25519),
             EVP_PKEY_HKDF => Ok(EvpPkeyType::Hkdf),
             EVP_PKEY_DH => Ok(EvpPkeyType::Dh),
-            _ => Err(JoseError::invalid_key("unsupported key type")),
+            _ => Err(JoseError::InvalidKey("unsupported key type".into())),
         }
     }
 }
@@ -426,7 +426,7 @@ impl EvpPkey {
     pub(crate) fn private_key_to_der(&self) -> Result<Box<[u8]>, JoseError> {
         let mut cbb = Cbb::with_capacity(self.key_size_bytes() * 4);
         if 1 != unsafe { EVP_marshal_private_key(cbb.as_mut_ptr(), self.as_ptr()) } {
-            return Err(JoseError::invalid_key("unsupported key type"));
+            return Err(JoseError::InvalidKey("unsupported key type".into()));
         }
         Ok(cbb.into_boxed_slice())
     }
@@ -434,7 +434,7 @@ impl EvpPkey {
     pub(crate) fn public_key_to_der(&self) -> Result<Box<[u8]>, JoseError> {
         let mut cbb = Cbb::with_capacity(self.key_size_bytes() * 4);
         if 1 != unsafe { EVP_marshal_public_key(cbb.as_mut_ptr(), self.as_ptr()) } {
-            return Err(JoseError::invalid_key("unsupported key type"));
+            return Err(JoseError::InvalidKey("unsupported key type".into()));
         }
         Ok(cbb.into_boxed_slice())
     }
@@ -446,7 +446,7 @@ impl EvpPkey {
             d2i_AutoPrivateKey(ptr::null_mut(), &mut inp, der.len() as std::os::raw::c_long)
         };
         if pkey.is_null() {
-            return Err(JoseError::invalid_key("invalid private key DER"));
+            return Err(JoseError::InvalidKey("invalid private key DER".into()));
         }
         Ok(Self::from_ptr(pkey))
     }
@@ -457,7 +457,7 @@ impl EvpPkey {
         let pkey =
             unsafe { d2i_PUBKEY(ptr::null_mut(), &mut inp, der.len() as std::os::raw::c_long) };
         if pkey.is_null() {
-            return Err(JoseError::invalid_key("invalid public key DER"));
+            return Err(JoseError::InvalidKey("invalid public key DER".into()));
         }
         Ok(Self::from_ptr(pkey))
     }
@@ -475,7 +475,7 @@ impl EvpPkey {
                 ptr::null_mut(),
             )
         } {
-            return Err(JoseError::invalid_key("unsupported key type"));
+            return Err(JoseError::InvalidKey("unsupported key type".into()));
         }
         // SAFETY: PEM format is guaranteed to be valid UTF-8
         unsafe { Ok(Box::from(std::str::from_utf8_unchecked(bio.as_slice()))) }
@@ -487,7 +487,7 @@ impl EvpPkey {
             // SAFETY: PEM_write_bio_PUBKEY only reads the key; C API lacks const qualifier
             PEM_write_bio_PUBKEY(bio.as_mut_ptr(), self.as_ptr() as *const _ as *mut EVP_PKEY)
         } {
-            return Err(JoseError::invalid_key("unsupported key type"));
+            return Err(JoseError::InvalidKey("unsupported key type".into()));
         }
         // SAFETY: PEM format is guaranteed to be valid UTF-8
         unsafe { Ok(Box::from(std::str::from_utf8_unchecked(bio.as_slice()))) }
@@ -656,7 +656,9 @@ impl EvpPkey {
             )
         };
         if ret != 1 {
-            return Err(JoseError::new("decryption failed"));
+            return Err(JoseError::IntegrityError(
+                "asymmetric decryption failed (ciphertext integrity check failed)".into(),
+            ));
         }
 
         unsafe {

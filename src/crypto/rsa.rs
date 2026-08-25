@@ -58,8 +58,8 @@ impl Rsa {
         if res != 1 {
             // n/e/d are still owned by the caller's BigNum wrappers; they drop
             // normally here, freeing the BIGNUMs.
-            return Err(JoseError::invalid_key(
-                "RSA key is missing a required modulus or exponent",
+            return Err(JoseError::InvalidKey(
+                "RSA key is missing a required modulus or exponent".into(),
             ));
         }
         n.manually_drop();
@@ -75,8 +75,8 @@ impl Rsa {
         // fails only when a factor (p or q) is missing.
         let res = unsafe { RSA_set0_factors(self.as_mut_ptr(), p.as_mut_ptr(), q.as_mut_ptr()) };
         if res != 1 {
-            return Err(JoseError::invalid_key(
-                "RSA key is missing a prime factor (p or q)",
+            return Err(JoseError::InvalidKey(
+                "RSA key is missing a prime factor (p or q)".into(),
             ));
         }
         p.manually_drop();
@@ -101,8 +101,8 @@ impl Rsa {
             )
         };
         if res != 1 {
-            return Err(JoseError::invalid_key(
-                "RSA key is missing a CRT parameter (dp, dq, or qi)",
+            return Err(JoseError::InvalidKey(
+                "RSA key is missing a CRT parameter (dp, dq, or qi)".into(),
             ));
         }
         dp.manually_drop();
@@ -213,7 +213,7 @@ impl TryFrom<i32> for RsaPadding {
             RSA_PKCS1_PADDING => Ok(RsaPadding::Pkcs1),
             RSA_PKCS1_PSS_PADDING => Ok(RsaPadding::Pkcs1Pss),
             RSA_PKCS1_OAEP_PADDING => Ok(RsaPadding::Pkcs1Oaep),
-            _ => Err(JoseError::General("invalid RSA padding type".to_string())),
+            _ => Err(JoseError::InvalidKey("invalid RSA padding type".into())),
         }
     }
 }

@@ -490,7 +490,9 @@ impl<'a> JsonWebEncryption<'a> {
         // A JWE protected header must be a JSON object; rejecting anything else
         // here keeps `set_header_name` (which inserts into the map) infallible.
         if !header.is_object() {
-            return Err(JoseError::new("JWE protected header is not a JSON object"));
+            return Err(JoseError::InvalidHeader(
+                "JWE protected header is not a JSON object".into(),
+            ));
         }
 
         // RFC 7516 Section 4.1.11: reject unsupported critical extensions. This
@@ -548,11 +550,11 @@ impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> 
             for idx in &mut indexes {
                 match iter.next() {
                     Some(i) => *idx = i,
-                    None => return Err(JoseError::new("not enough parts")),
+                    None => return Err(JoseError::MalformedToken("not enough parts".into())),
                 }
             }
             if iter.next().is_some() {
-                return Err(JoseError::new("too many parts"));
+                return Err(JoseError::MalformedToken("too many parts".into()));
             }
             indexes
         };

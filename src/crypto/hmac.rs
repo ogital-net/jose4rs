@@ -23,10 +23,10 @@ pub(crate) fn hmac_buf(
     debug_assert!(buf.len() >= len);
 
     if key.len() < len {
-        return Err(JoseError::invalid_key("key too small"));
+        return Err(JoseError::InvalidKey("key too small".into()));
     }
     if key.len() > 1024 {
-        return Err(JoseError::invalid_key("key too large"));
+        return Err(JoseError::InvalidKey("key too large".into()));
     }
 
     let mut out_len: std::ffi::c_uint = 0;
@@ -64,10 +64,10 @@ impl HmacCtx {
     pub(crate) fn init(md: digest::Algorithm, key: &[u8]) -> Result<Self, JoseError> {
         const KEY_MAX: usize = 1024;
         if key.len() < md.output_len() / 2 {
-            return Err(JoseError::invalid_key("key too small"));
+            return Err(JoseError::InvalidKey("key too small".into()));
         }
         if key.len() > KEY_MAX {
-            return Err(JoseError::invalid_key("key too large"));
+            return Err(JoseError::InvalidKey("key too large".into()));
         }
 
         let ptr = unsafe { HMAC_CTX_new() };

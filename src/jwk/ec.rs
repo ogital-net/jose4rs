@@ -128,7 +128,9 @@ impl EcJsonWebKey {
     pub fn from_pem(pem: impl AsRef<str>) -> Result<Self, JoseError> {
         match super::JsonWebKey::from_pem(pem)? {
             super::JsonWebKey::EllipticCurve(jwk) => Ok(jwk),
-            _ => Err(JoseError::invalid_key("PEM does not contain an EC key")),
+            _ => Err(JoseError::InvalidKey(
+                "PEM does not contain an EC key".into(),
+            )),
         }
     }
 
@@ -163,8 +165,8 @@ impl EcJsonWebKey {
     fn from_x509_cert(cert: &X509Cert) -> Result<Self, JoseError> {
         let pkey = cert.public_key()?;
         if pkey.key_type() != EvpPkeyType::Ec {
-            return Err(JoseError::invalid_key(
-                "certificate public key is not an EC key",
+            return Err(JoseError::InvalidKey(
+                "certificate public key is not an EC key".into(),
             ));
         }
         let mut jwk = Self::from_evp_pkey(pkey);

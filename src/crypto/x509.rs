@@ -23,7 +23,9 @@ impl X509Cert {
         let mut ptr = der.as_ptr();
         let x509 = unsafe { d2i_X509(ptr::null_mut(), &mut ptr, der.len() as _) };
         if x509.is_null() {
-            return Err(JoseError::invalid_key("invalid X.509 certificate DER"));
+            return Err(JoseError::InvalidKey(
+                "invalid X.509 certificate DER".into(),
+            ));
         }
         unsafe { Ok(Self(ptr::NonNull::new_unchecked(x509))) }
     }
@@ -33,7 +35,7 @@ impl X509Cert {
         // SAFETY: pem is borrowed for the duration of the Bio's use below
         unsafe { Bio::from_slice(pem) }
             .read_pem_x509()
-            .ok_or_else(|| JoseError::invalid_key("invalid X.509 certificate PEM"))
+            .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate PEM".into()))
     }
 
     /// Parses from a BIO. Shared by `from_pem` and `Bio::read_pem_x509`.
@@ -54,8 +56,8 @@ impl X509Cert {
     pub(crate) fn public_key(&self) -> Result<EvpPkey, JoseError> {
         let pkey = unsafe { X509_get_pubkey(self.0.as_ptr()) };
         if pkey.is_null() {
-            return Err(JoseError::invalid_key(
-                "certificate has no usable public key",
+            return Err(JoseError::InvalidKey(
+                "certificate has no usable public key".into(),
             ));
         }
         Ok(EvpPkey::from_ptr(pkey))
@@ -66,13 +68,17 @@ impl X509Cert {
         // First call with a null output pointer to size the buffer.
         let len = unsafe { i2d_X509(self.0.as_ptr(), ptr::null_mut()) };
         if len <= 0 {
-            return Err(JoseError::invalid_key("failed to encode X.509 certificate"));
+            return Err(JoseError::InvalidKey(
+                "failed to encode X.509 certificate".into(),
+            ));
         }
         let mut out = Vec::with_capacity(len as usize);
         let mut ptr = out.as_mut_ptr();
         let written = unsafe { i2d_X509(self.0.as_ptr(), &mut ptr) };
         if written != len {
-            return Err(JoseError::invalid_key("failed to encode X.509 certificate"));
+            return Err(JoseError::InvalidKey(
+                "failed to encode X.509 certificate".into(),
+            ));
         }
         // SAFETY: i2d_X509 wrote exactly `len` bytes.
         unsafe { out.set_len(len as usize) };

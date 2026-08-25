@@ -91,7 +91,7 @@ pub(crate) fn unwrap_key(
     // integrity check value, and must be a multiple of 8 bytes. Validate the
     // length before allocating to avoid an underflow on `src.len() - 8`.
     if src.len() < 16 || !src.len().is_multiple_of(8) {
-        return Err(JoseError::new("invalid wrapped key length"));
+        return Err(JoseError::InvalidKey("invalid wrapped key length".into()));
     }
     let mut out = mem::new_boxed_slice(src.len() - 8);
     let written = unwrap_key_buf(aes_key, iv, src, &mut out)?;
@@ -119,7 +119,9 @@ pub(crate) fn unwrap_key_buf(
         ) as i32
     };
     if len <= 0 {
-        return Err(JoseError::new("AES key unwrap failed"));
+        return Err(JoseError::IntegrityError(
+            "AES key unwrap failed (wrapped key integrity check failed)".into(),
+        ));
     }
     Ok(len as usize)
 }

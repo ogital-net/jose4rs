@@ -127,8 +127,8 @@ impl OkpJsonWebKey {
     pub fn from_pem(pem: impl AsRef<str>) -> Result<Self, JoseError> {
         match super::JsonWebKey::from_pem(pem)? {
             super::JsonWebKey::OctetKeyPair(jwk) => Ok(jwk),
-            _ => Err(JoseError::invalid_key(
-                "PEM does not contain an Ed25519 or X25519 key",
+            _ => Err(JoseError::InvalidKey(
+                "PEM does not contain an Ed25519 or X25519 key".into(),
             )),
         }
     }
@@ -172,8 +172,8 @@ impl OkpJsonWebKey {
                 jwk.x5t_s256 = Some(cert.thumbprint(crate::crypto::DigestAlgorithm::Sha256)?);
                 Ok(jwk)
             }
-            _ => Err(JoseError::invalid_key(
-                "certificate public key is not an Ed25519 or X25519 key",
+            _ => Err(JoseError::InvalidKey(
+                "certificate public key is not an Ed25519 or X25519 key".into(),
             )),
         }
     }

@@ -242,13 +242,15 @@ impl KeyManagementAlgorithm {
                 // RFC 7516 Section 5.2 step 6: for direct key agreement the JWE
                 // Encrypted Key MUST be the empty octet sequence.
                 if !encrypted_key.is_empty() {
-                    return Err(JoseError::new(
-                        "no encrypted key is to be used with direct key agreement (ECDH-ES)",
+                    return Err(JoseError::InvalidHeader(
+                        "no encrypted key is to be used with direct key agreement (ECDH-ES)".into(),
                     ));
                 }
                 let epk = headers
                     .get(HeaderParameter::EphemeralPublicKey.name())
-                    .ok_or(JoseError::new("missing 'epk' header parameter"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing 'epk' header parameter".into())
+                    })?;
                 let epk = JsonWebKey::from_value(epk)?;
 
                 let private_key = match management_key {
@@ -265,7 +267,9 @@ impl KeyManagementAlgorithm {
                 let shared_secret = private_key.derive(public_key)?;
                 let content_enc_alg: ContentEncryptionAlgorithm = headers
                     .get_str(HeaderParameter::EncryptionMethod.name())
-                    .ok_or(JoseError::new("missing 'enc' header parameter"))?
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing 'enc' header parameter".into())
+                    })?
                     .parse()?;
                 let party_u_info = headers
                     .get_str(HeaderParameter::AgreementPartyUInfo.name())
@@ -287,7 +291,9 @@ impl KeyManagementAlgorithm {
             KeyManagementAlgorithm::EcdhEsA128Kw => {
                 let epk = headers
                     .get(HeaderParameter::EphemeralPublicKey.name())
-                    .ok_or(JoseError::new("missing 'epk' header parameter"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing 'epk' header parameter".into())
+                    })?;
                 let epk = JsonWebKey::from_value(epk)?;
 
                 let private_key = match management_key {
@@ -316,7 +322,9 @@ impl KeyManagementAlgorithm {
             KeyManagementAlgorithm::EcdhEsA192Kw => {
                 let epk = headers
                     .get(HeaderParameter::EphemeralPublicKey.name())
-                    .ok_or(JoseError::new("missing 'epk' header parameter"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing 'epk' header parameter".into())
+                    })?;
                 let epk = JsonWebKey::from_value(epk)?;
 
                 let private_key = match management_key {
@@ -345,7 +353,9 @@ impl KeyManagementAlgorithm {
             KeyManagementAlgorithm::EcdhEsA256Kw => {
                 let epk = headers
                     .get(HeaderParameter::EphemeralPublicKey.name())
-                    .ok_or(JoseError::new("missing 'epk' header parameter"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing 'epk' header parameter".into())
+                    })?;
                 let epk = JsonWebKey::from_value(epk)?;
 
                 let private_key = match management_key {
@@ -415,10 +425,12 @@ impl KeyManagementAlgorithm {
                     .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
                 let encoded_iv = headers
                     .get_str(HeaderParameter::InitializationVector.name())
-                    .ok_or(JoseError::new("missing IV header param"))?;
+                    .ok_or_else(|| JoseError::InvalidHeader("missing IV header param".into()))?;
                 let encoded_tag = headers
                     .get_str(HeaderParameter::AuthenticationTag.name())
-                    .ok_or(JoseError::new("missing authentication tag header param"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing authentication tag header param".into())
+                    })?;
                 let iv = base64::url_decode(encoded_iv)?;
                 let tag = base64::url_decode(encoded_tag)?;
 
@@ -446,10 +458,12 @@ impl KeyManagementAlgorithm {
                     .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
                 let encoded_iv = headers
                     .get_str(HeaderParameter::InitializationVector.name())
-                    .ok_or(JoseError::new("missing IV header param"))?;
+                    .ok_or_else(|| JoseError::InvalidHeader("missing IV header param".into()))?;
                 let encoded_tag = headers
                     .get_str(HeaderParameter::AuthenticationTag.name())
-                    .ok_or(JoseError::new("missing authentication tag header param"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing authentication tag header param".into())
+                    })?;
                 let iv = base64::url_decode(encoded_iv)?;
                 let tag = base64::url_decode(encoded_tag)?;
 
@@ -476,10 +490,12 @@ impl KeyManagementAlgorithm {
                     .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
                 let encoded_iv = headers
                     .get_str(HeaderParameter::InitializationVector.name())
-                    .ok_or(JoseError::new("missing IV header param"))?;
+                    .ok_or_else(|| JoseError::InvalidHeader("missing IV header param".into()))?;
                 let encoded_tag = headers
                     .get_str(HeaderParameter::AuthenticationTag.name())
-                    .ok_or(JoseError::new("missing authentication tag header param"))?;
+                    .ok_or_else(|| {
+                        JoseError::InvalidHeader("missing authentication tag header param".into())
+                    })?;
                 let iv = base64::url_decode(encoded_iv)?;
                 let tag = base64::url_decode(encoded_tag)?;
 
@@ -552,22 +568,22 @@ impl KeyManagementAlgorithm {
 
         let iteration_count = headers
             .get_i64(HeaderParameter::Pbes2IterationCount.name())
-            .ok_or(JoseError::new("missing 'p2c' header parameter"))?;
+            .ok_or_else(|| JoseError::InvalidHeader("missing 'p2c' header parameter".into()))?;
         if !(Self::PBES2_MIN_ITERATION_COUNT..=Self::PBES2_MAX_ITERATION_COUNT)
             .contains(&iteration_count)
         {
-            return Err(JoseError::new(format!(
+            return Err(JoseError::InvalidAlgorithm(format!(
                 "PBES2 iteration count ({iteration_count}) out of acceptable range"
             )));
         }
 
         let encoded_salt_input = headers
             .get_str(HeaderParameter::Pbes2SaltInput.name())
-            .ok_or(JoseError::new("missing 'p2s' header parameter"))?;
+            .ok_or_else(|| JoseError::InvalidHeader("missing 'p2s' header parameter".into()))?;
         let salt_input = base64::url_decode(encoded_salt_input)?;
         if salt_input.len() < 8 {
-            return Err(JoseError::new(
-                "A 'p2s' salt input value containing 8 or more octets MUST be used",
+            return Err(JoseError::InvalidHeader(
+                "A 'p2s' salt input value containing 8 or more octets MUST be used".into(),
             ));
         }
 
@@ -655,8 +671,8 @@ impl KeyManagementAlgorithm {
                 c as u32
             }
             Some(_) => {
-                return Err(JoseError::new(
-                    "PBES2 iteration count out of acceptable range",
+                return Err(JoseError::InvalidAlgorithm(
+                    "PBES2 iteration count out of acceptable range".to_string(),
                 ))
             }
             None => {
@@ -682,8 +698,8 @@ impl KeyManagementAlgorithm {
                 salt_input
             };
         if salt_input.len() < 8 {
-            return Err(JoseError::new(
-                "A 'p2s' salt input value containing 8 or more octets MUST be used",
+            return Err(JoseError::InvalidHeader(
+                "A 'p2s' salt input value containing 8 or more octets MUST be used".into(),
             ));
         }
 
@@ -740,7 +756,7 @@ impl KeyManagementAlgorithm {
         let epk_json = epk_jwk.to_json(crate::jwk::OutputControlLevel::PublicOnly);
         let mut epk_bytes = epk_json.into_bytes();
         let epk_value =
-            simd_json::to_owned_value(&mut epk_bytes).map_err(|e| JoseError::new(e.to_string()))?;
+            simd_json::to_owned_value(&mut epk_bytes).map_err(|e| JoseError::json(&e))?;
         headers
             .insert(
                 HeaderParameter::EphemeralPublicKey.name().to_string(),
@@ -791,7 +807,7 @@ fn set_header_str(
     value: &[u8],
 ) -> Result<(), JoseError> {
     let value = std::str::from_utf8(value)
-        .map_err(|_| JoseError::new("header value is not valid UTF-8"))?;
+        .map_err(|_| JoseError::InvalidHeader("header value is not valid UTF-8".into()))?;
     headers
         .insert(name.to_string(), value)
         .map_err(|_| JoseError::new("failed to set header parameter"))?;

@@ -476,7 +476,7 @@ mod tests {
         fn fetch(&self, _url: &str) -> Result<FetchResponse, JoseError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             if self.fail {
-                return Err(JoseError::General("network down".into()));
+                return Err(JoseError::JwksFetch("network down".into()));
             }
             Ok(self
                 .response

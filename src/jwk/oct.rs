@@ -162,14 +162,14 @@ impl OctetSequenceJsonWebKey {
                 "HS256" => Some(AlgorithmIdentifier::HmacSha256),
                 "HS384" => Some(AlgorithmIdentifier::HmacSha384),
                 "HS512" => Some(AlgorithmIdentifier::HmacSha512),
-                _ => return Err(JoseError::invalid_key(format!("invalid 'alg' {alg}"))),
+                _ => return Err(JoseError::InvalidKey(format!("invalid 'alg' {alg}"))),
             },
             None => None,
         };
 
         let k = match value.get("k") {
             Some(k) => base64::url_decode(k)?,
-            None => return Err(JoseError::invalid_key("missing 'k' parameter")),
+            None => return Err(JoseError::InvalidKey("missing 'k' parameter".into())),
         };
         let mut jwk = Self::new(k, alg);
         jwk.key_id = value.get("kid").map(str::to_string);

@@ -96,7 +96,10 @@ impl EvpAeadCtx {
                 aad.as_ptr(),
                 aad.len(),
             ) {
-                return Err(JoseError::new("decryption failed"));
+                return Err(JoseError::IntegrityError(
+                    "AEAD decryption failed (authentication tag mismatch or invalid ciphertext)"
+                        .into(),
+                ));
             }
         }
 
