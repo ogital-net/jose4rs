@@ -253,6 +253,38 @@ impl AsyncHttpsJwks {
         Ok(keys.iter().find(|k| k.key_id() == Some(kid)).cloned())
     }
 
+    /// Selects a JWS verification key from the JWKS for a JWS with the given
+    /// `kid` and `alg` header values.
+    ///
+    /// This is the one-call OIDC ID-token path: it triggers a cache-refreshing
+    /// fetch on a `kid` miss (the key-rotation case), then runs a
+    /// [`super::VerificationJwkSelector`] over the result. The selector
+    /// enforces that the key's `kty` is compatible with `alg` (the
+    /// algorithm-confusion defense), narrows by curve for EC algorithms, and
+    /// matches `use: "sig"` if the JWK declares one. Returns the single best
+    /// candidate, or `None` if no key matches.
+    ///
+    /// Pass `kid = None` when the JWS has no `kid` header; the selector will
+    /// then consider every key in the JWKS (still filtered by `alg`/kty/use).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JWKS fetch fails and no stale keys are retained.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal lock is poisoned.
+    pub async fn select_verification_key(
+        &self,
+        kid: Option<&str>,
+        alg: &str,
+    ) -> Result<Option<JsonWebKey>, JoseError> {
+        let keys = self.keys_with_refresh(kid).await?;
+        Ok(super::VerificationJwkSelector::new()
+            .select(kid, alg, &keys)
+            .cloned())
+    }
+
     /// Refreshes unconditionally, ignoring the refresh-reprieve threshold.
     async fn force_refresh(&self) -> Result<Arc<Vec<JsonWebKey>>, JoseError> {
         {
@@ -384,5 +416,32 @@ mod tests {
             Some("the key")
         );
         assert!(block_on(jwks.key("nope")).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_async_select_verification_key_matches_alg_and_kid() {
+        let fetcher = Arc::new(MockAsyncFetcher {
+            calls: AtomicUsize::new(0),
+        });
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Happy path: kid matches, alg matches the EC P-256 key.
+        let selected = block_on(jwks.select_verification_key(Some("the key"), "ES256")).unwrap();
+        assert!(selected.is_some());
+        assert_eq!(selected.unwrap().key_id(), Some("the key"));
+
+        // Wrong alg: selector rejects because the EC key's kty is incompatible
+        // with RS256. This is the algorithm-confusion defense.
+        let wrong_alg = block_on(jwks.select_verification_key(Some("the key"), "RS256")).unwrap();
+        assert!(wrong_alg.is_none());
+
+        // Wrong kid: no match (and a kid-miss refresh fires once).
+        let wrong_kid = block_on(jwks.select_verification_key(Some("other"), "ES256")).unwrap();
+        assert!(wrong_kid.is_none());
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
+
+        // No kid: still matches by alg.
+        let no_kid = block_on(jwks.select_verification_key(None, "ES256")).unwrap();
+        assert!(no_kid.is_some());
     }
 }

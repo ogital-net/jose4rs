@@ -77,12 +77,24 @@ criterion = { version = "0.8.2", features = ["html_reports"] }
 dhat = "0"
 josekit = "0.10.3"
 jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
 ring = "0.17.14"
 serde = { version = "1.0.229", features = ["derive"] }
+# `wiremock` spins up a real local HTTP server for the JWKS examples so the
+# fetch path is exercised end-to-end (real socket, real cache headers, real
+# Cache-Control parsing). `tokio` is only needed because `wiremock` 0.6 is
+# async-only; the sync example drives setup via a single-threaded runtime,
+# then uses `reqwest::blocking` for the actual fetches.
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+wiremock = "0.6"
 
 [[example]]
 name = "jwks_https"
 required-features = ["jwks-https"]
+
+[[example]]
+name = "jwks_https_async"
+required-features = ["jwks-https-async"]
 
 [[bench]]
 name = "jwt_comparison"
