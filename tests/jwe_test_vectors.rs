@@ -139,10 +139,9 @@ fn decrypt_all_external_vectors() {
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(v.compact)
             .unwrap_or_else(|e| panic!("{context}: parse failed: {e}"));
-        jwe.set_key(&jwk);
 
         let payload = jwe
-            .payload()
+            .payload(&jwk)
             .unwrap_or_else(|e| panic!("{context}: decrypt failed: {e}"));
         assert_eq!(payload, EXPECTED_PLAINTEXT, "{context}: wrong plaintext");
     }

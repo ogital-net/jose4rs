@@ -57,9 +57,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The payload of the JWS is JSON content of the JWT Claims.
     jws.set_payload(claims.to_json());
 
-    // The JWT is signed using the sender's private key.
-    jws.set_key(&sender_jwk);
-
     // Set the Key ID (kid) header because it's just the polite thing to do.
     jws.set_key_id_header_value(sender_kid);
 
@@ -71,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // inner JWT/JWS representation, which is a string consisting of three dot
     // ('.') separated base64url-encoded parts in the form
     // Header.Payload.Signature
-    let inner_jwt = jws.compact_serialization()?;
+    let inner_jwt = jws.compact_serialization(&sender_jwk)?;
 
     // The outer JWT is a JWE.
     let mut jwe = JsonWebEncryption::new();
@@ -88,7 +85,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // We encrypt to the receiver using their public key.
-    jwe.set_key(&receiver_jwk);
     jwe.set_key_id_header_value(receiver_kid);
 
     // A nested JWT requires that the cty (Content Type) header be set to "JWT"
@@ -102,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // representation, which is a string consisting of five dot ('.') separated
     // base64url-encoded parts in the form
     // Header.EncryptedKey.IV.Ciphertext.AuthenticationTag
-    jwe.encrypt()?;
+    jwe.encrypt(&receiver_jwk)?;
     let jwt = jwe.compact_serialization()?;
 
     // Now you can do something with the JWT. Like send it to some other party
@@ -126,18 +122,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut decrypt_jwe = JsonWebEncryption::new();
     decrypt_jwe.set_algorithm_constraints(&jwe_alg_constraints);
     decrypt_jwe.set_compact_serialization(&jwt)?;
-    decrypt_jwe.set_key(&receiver_jwk);
-    let inner_jwt = String::from_utf8(decrypt_jwe.payload()?.to_vec())?;
+    let inner_jwt = String::from_utf8(decrypt_jwe.payload(&receiver_jwk)?.to_vec())?;
 
     // Verify the inner JWS with the sender's public key.
     let mut verify_jws = JsonWebSignature::new();
     verify_jws.set_algorithm_constraints(&jws_alg_constraints);
     verify_jws.set_compact_serialization(&inner_jwt)?;
-    verify_jws.set_key(&sender_jwk);
-    if !verify_jws.verify_signature()? {
+    if !verify_jws.verify_signature(&sender_jwk)? {
         return Err("invalid JWS signature".into());
     }
-    let verified_claims_json = String::from_utf8(verify_jws.payload()?.to_vec())?;
+    let verified_claims_json = String::from_utf8(verify_jws.payload(&sender_jwk)?.to_vec())?;
 
     // Validate the claims. It is typically advisable to require a (reasonable)
     // expiration time, a trusted issuer, and an audience that identifies your

@@ -29,13 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set the signature algorithm on the JWS that will integrity protect the payload.
     jws.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
 
-    // Set the signing key on the JWS.
-    jws.set_key(&jwk);
-
     // Sign the JWS and produce the compact serialization or complete JWS
     // representation, which is a string consisting of three dot ('.') separated
     // base64url-encoded parts in the form Header.Payload.Signature
-    let jws_compact_serialization = jws.compact_serialization()?;
+    let jws_compact_serialization = jws.compact_serialization(&jwk)?;
 
     // Do something useful with your JWS.
     println!("{jws_compact_serialization}");

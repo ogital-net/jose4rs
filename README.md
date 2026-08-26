@@ -113,8 +113,7 @@ use jose4rs::jwk::JsonWebKey;
 # let key_json = r#"{"kty":"oct","k":"..."}"#;
 let key = JsonWebKey::from_json(key_json)?;
 let mut jws = JsonWebSignature::from_compact_serialization(compact)?;
-jws.set_key(&key);
-let payload = jws.payload()?; // verifies the signature first
+let payload = jws.payload(&key)?; // verifies the signature first
 # Ok::<(), jose4rs::error::JoseError>(())
 ```
 

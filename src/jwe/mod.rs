@@ -48,11 +48,10 @@ pub(super) struct ContentEncryptionParts {
 }
 
 /// A parsed or in-progress JWE. After parsing with
-/// [`JsonWebStructure::set_compact_serialization`],
-/// decrypt by reading [`JsonWebStructure::payload`].
+/// [`JsonWebStructure::set_compact_serialization`], decrypt by calling
+/// [`JsonWebEncryption::payload`].
 pub struct JsonWebEncryption<'a> {
     buffer: Vec<u8>,
-    key: Option<&'a JsonWebKey>,
     header: Option<simd_json::owned::Value>,
     encoded_header: Option<BufferRef>,
     encrypted_key: Option<BufferRef>,
@@ -75,7 +74,6 @@ impl std::fmt::Debug for JsonWebEncryption<'_> {
         f.debug_struct("JsonWebEncryption")
             .field("alg", &self.algorithm())
             .field("enc", &self.encryption_method())
-            .field("has_key", &self.key.is_some())
             .field("has_header", &self.header.is_some())
             .field("has_encrypted_key", &self.encrypted_key.is_some())
             .field("has_ciphertext", &self.ciphertext.is_some())
@@ -92,7 +90,6 @@ impl<'a> JsonWebEncryption<'a> {
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
-            key: None,
             header: None,
             encoded_header: None,
             encrypted_key: None,
@@ -167,14 +164,13 @@ impl<'a> JsonWebEncryption<'a> {
         }
     }
 
-    fn decrypt(&mut self) -> Result<&[u8], JoseError> {
+    fn decrypt(&mut self, management_key: &JsonWebKey) -> Result<&[u8], JoseError> {
         let key_mgmt_alg = self.get_key_mgmt_alg(true)?;
         let content_enc_alg = self.get_content_enc_alg()?;
 
         let ciphertext_ref = self
             .ciphertext
             .ok_or(JoseError::new("missing ciphertext"))?;
-        let management_key = self.key.ok_or(JoseError::new("no decryption key"))?;
         let encrypted_key_ref = self
             .encrypted_key
             .ok_or(JoseError::new("missing encrypted key"))?;
@@ -264,20 +260,19 @@ impl<'a> JsonWebEncryption<'a> {
         Ok(plaintext.get(&self.buffer))
     }
 
-    /// Encrypts the payload set by [`JsonWebStructure::set_payload`] using the
-    /// key management and content encryption algorithms named by the `alg` and
-    /// `enc` headers. After encryption, the compact serialization can be
-    /// produced.
+    /// Encrypts the payload set by [`JsonWebStructure::set_payload`] using
+    /// `management_key` and the key management and content encryption
+    /// algorithms named by the `alg` and `enc` headers. After encryption,
+    /// the compact serialization can be produced.
     ///
     /// # Errors
     ///
     /// Returns an error if the `alg`/`enc` headers are missing or unsupported,
-    /// if no encryption key or plaintext payload has been set, or if key
-    /// management or content encryption fails.
-    pub fn encrypt(&mut self) -> Result<(), JoseError> {
+    /// if no plaintext payload has been set, or if key management or content
+    /// encryption fails.
+    pub fn encrypt(&mut self, management_key: &JsonWebKey) -> Result<(), JoseError> {
         let key_mgmt_alg = self.get_key_mgmt_alg(true)?;
         let content_enc_alg = self.get_content_enc_alg()?;
-        let management_key = self.key.ok_or(JoseError::new("no encryption key"))?;
 
         let plaintext_ref = self
             .plaintext
@@ -419,7 +414,7 @@ impl<'a> JsonWebEncryption<'a> {
     /// Returns an error if the input is not a well-formed five-part JWE
     /// compact serialization.
     pub fn from_compact_serialization(
-        compact_serialization: &'a (impl AsRef<[u8]> + ?Sized),
+        compact_serialization: &(impl AsRef<[u8]> + ?Sized),
     ) -> Result<Self, JoseError> {
         let mut jwe = Self::new();
         jwe.set_compact_serialization(compact_serialization)?;
@@ -539,7 +534,7 @@ impl<'a> JsonWebEncryption<'a> {
 impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> {
     fn set_compact_serialization(
         &mut self,
-        compact_serialization: &'a (impl AsRef<[u8]> + ?Sized),
+        compact_serialization: &(impl AsRef<[u8]> + ?Sized),
     ) -> Result<(), JoseError> {
         let compact_serialization = compact_serialization.as_ref();
 
@@ -577,7 +572,68 @@ impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> 
         )
     }
 
-    fn compact_serialization(&self) -> Result<String, JoseError> {
+    fn set_payload(&mut self, payload: impl AsRef<[u8]>) {
+        let start = self.buffer.len();
+        self.buffer.extend_from_slice(payload.as_ref());
+        self.plaintext = Some(BufferRef::new(start, self.buffer.len()));
+    }
+
+    fn set_header_value(&mut self, name: impl Into<String>, value: simd_json::owned::Value) {
+        if let Some(ref mut header) = self.header {
+            header.insert(name.into(), value).unwrap();
+        } else {
+            let mut header = simd_json::owned::Value::object();
+            header.insert(name.into(), value).unwrap();
+            self.header = Some(header);
+        }
+    }
+
+    fn header_name(&self, name: impl AsRef<str>) -> Option<&str> {
+        match self.header {
+            Some(ref header) => header.get_str(name.as_ref()),
+            None => None,
+        }
+    }
+
+    fn set_algorithm_constraints(
+        &mut self,
+        algorithm_constraints: &'a AlgorithmConstraints<KeyManagementAlgorithm>,
+    ) {
+        self.algorithm_constraints = algorithm_constraints;
+    }
+}
+
+impl<'a> JsonWebEncryption<'a> {
+    /// Returns the plaintext, decrypting the JWE if necessary.
+    ///
+    /// If the JWE was just encrypted by this instance (no incoming compact
+    /// serialization), the stored plaintext is returned directly. Otherwise
+    /// the JWE is decrypted using `management_key` and the result is cached
+    /// on the instance for subsequent calls.
+    ///
+    /// This mirrors jose4j's `JsonWebEncryption.getPayload()` /
+    /// `getPlaintextBytes()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no plaintext is available and either decryption
+    /// fails, key management fails, or content encryption fails.
+    pub fn payload(&mut self, management_key: &JsonWebKey) -> Result<&[u8], JoseError> {
+        if let Some(plain) = self.plaintext {
+            return Ok(plain.get(&self.buffer));
+        }
+        self.decrypt(management_key)
+    }
+
+    /// Produces the JWE compact serialization from the parsed/encrypted state.
+    /// Does not require a key -- encryption produces all required parts;
+    /// the caller may invoke this on a parsed token to re-serialize it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any required part (encoded header, IV, ciphertext,
+    /// auth tag) is missing.
+    pub fn compact_serialization(&self) -> Result<String, JoseError> {
         let encoded_header = self
             .encoded_header
             .as_ref()
@@ -625,52 +681,6 @@ impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> 
         // SAFETY: base64url + encoded header are pure ASCII, always valid UTF-8.
         unsafe { Ok(String::from_utf8_unchecked(out)) }
     }
-
-    fn set_payload(&mut self, payload: impl AsRef<[u8]>) {
-        let start = self.buffer.len();
-        self.buffer.extend_from_slice(payload.as_ref());
-        self.plaintext = Some(BufferRef::new(start, self.buffer.len()));
-    }
-
-    fn payload(&mut self) -> Result<&[u8], JoseError> {
-        if let Some(plain) = self.plaintext {
-            return Ok(plain.get(&self.buffer));
-        }
-
-        self.decrypt()
-    }
-
-    fn set_header_value(&mut self, name: impl Into<String>, value: simd_json::owned::Value) {
-        if let Some(ref mut header) = self.header {
-            header.insert(name.into(), value).unwrap();
-        } else {
-            let mut header = simd_json::owned::Value::object();
-            header.insert(name.into(), value).unwrap();
-            self.header = Some(header);
-        }
-    }
-
-    fn header_name(&self, name: impl AsRef<str>) -> Option<&str> {
-        match self.header {
-            Some(ref header) => header.get_str(name.as_ref()),
-            None => None,
-        }
-    }
-
-    fn set_key(&mut self, key: &'a JsonWebKey) {
-        self.key = Some(key);
-    }
-
-    fn key(&self) -> Option<&'a JsonWebKey> {
-        self.key
-    }
-
-    fn set_algorithm_constraints(
-        &mut self,
-        algorithm_constraints: &'a AlgorithmConstraints<KeyManagementAlgorithm>,
-    ) {
-        self.algorithm_constraints = algorithm_constraints;
-    }
 }
 
 pub(super) struct ContentEncryptionKeys {
@@ -705,7 +715,7 @@ impl ContentEncryptionKeys {
     }
 }
 
-impl<'a> Default for JsonWebEncryption<'a> {
+impl Default for JsonWebEncryption<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -730,10 +740,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -764,10 +773,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -780,10 +788,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -796,10 +803,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -812,10 +818,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -828,10 +833,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -844,10 +848,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -860,10 +863,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -879,10 +881,9 @@ mod tests {
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -895,10 +896,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -911,10 +911,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -927,10 +926,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -943,10 +941,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -959,10 +956,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -975,10 +971,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -991,10 +986,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -1007,10 +1001,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -1023,10 +1016,9 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = b"Hello world!";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
     }
 
@@ -1046,13 +1038,12 @@ mod tests {
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
         let expected = "{\"keys\":[\
             {\"kty\":\"oct\",\"kid\":\"77c7e2b8-6e13-45cf-8672-617b5b45243a\",\"use\":\"enc\",\"alg\":\"A128GCM\",\"k\":\"XctOhJAkA-pD9Lh7ZgW_2A\"},\
             {\"kty\":\"oct\",\"kid\":\"81b20965-8332-43d9-a468-82160ad91ac8\",\"use\":\"enc\",\"alg\":\"A128KW\",\"k\":\"GZy6sIZ6wl9NJOKB-jnmVQ\"},\
             {\"kty\":\"oct\",\"kid\":\"18ec08e1-bfa9-4d95-b205-2b4dd1d4321d\",\"use\":\"enc\",\"alg\":\"A256GCMKW\",\"k\":\"qC57l_uxcm7Nm3K-ct4GFjx8tM1U8CZ0NLBvdQstiS8\"}]}";
-        let payload = jwe.payload().unwrap();
+        let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(payload, expected.as_bytes());
     }
 
@@ -1072,9 +1063,8 @@ mod tests {
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(compact_serialization)
             .unwrap();
-        jwe.set_key(&jwk);
 
-        assert!(jwe.payload().is_err());
+        assert!(jwe.payload(&jwk).is_err());
     }
 
     // Round-trip encrypt -> decrypt helpers and tests. Each exercises a
@@ -1098,16 +1088,14 @@ mod tests {
         enc.set_algorithm_header_value(key_mgmt_alg.name());
         enc.set_header(HeaderParameter::EncryptionMethod, content_enc_alg.name());
         enc.set_payload(plaintext);
-        enc.set_key(&key);
-        enc.encrypt().unwrap();
+        enc.encrypt(&key).unwrap();
         let compact = enc.compact_serialization().unwrap();
 
         // Decrypt from the compact serialization.
         let mut dec = JsonWebEncryption::new();
         dec.set_algorithm_constraints(constraints);
         dec.set_compact_serialization(&compact).unwrap();
-        dec.set_key(&key);
-        let decrypted = dec.payload().unwrap();
+        let decrypted = dec.payload(&key).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
@@ -1169,8 +1157,7 @@ mod tests {
             enc.set_encryption_method(enc_alg);
             enc.set_payload(plaintext);
             enc.enable_default_compression();
-            enc.set_key(&key);
-            enc.encrypt().unwrap();
+            enc.encrypt(&key).unwrap();
             // The zip header must be present in the emitted token.
             assert_eq!(enc.header(HeaderParameter::Zip), Some("DEF"));
             let compact = enc.compact_serialization().unwrap();
@@ -1178,8 +1165,7 @@ mod tests {
             let mut dec = JsonWebEncryption::new();
             dec.set_algorithm_constraints(&constraints);
             dec.set_compact_serialization(&compact).unwrap();
-            dec.set_key(&key);
-            let decrypted = dec.payload().unwrap();
+            let decrypted = dec.payload(&key).unwrap();
             assert_eq!(decrypted, plaintext);
         }
     }
@@ -1201,25 +1187,22 @@ mod tests {
         enc.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
         enc.set_payload(&plaintext);
         enc.enable_default_compression();
-        enc.set_key(&key);
-        enc.encrypt().unwrap();
+        enc.encrypt(&key).unwrap();
         let compact = enc.compact_serialization().unwrap();
 
         let mut dec = JsonWebEncryption::new();
         dec.set_algorithm_constraints(&constraints);
         dec.set_compact_serialization(&compact).unwrap();
-        dec.set_key(&key);
         dec.set_max_decompressed_size(1024);
-        let err = dec.payload().unwrap_err();
+        let err = dec.payload(&key).unwrap_err();
         assert!(err.to_string().contains("exceeds"));
 
         // With an adequate cap the same token decrypts fully.
         let mut dec2 = JsonWebEncryption::new();
         dec2.set_algorithm_constraints(&constraints);
         dec2.set_compact_serialization(&compact).unwrap();
-        dec2.set_key(&key);
         dec2.set_max_decompressed_size(1 << 20);
-        assert_eq!(dec2.payload().unwrap(), &plaintext[..]);
+        assert_eq!(dec2.payload(&key).unwrap(), &plaintext[..]);
     }
 
     #[test]
@@ -1238,8 +1221,7 @@ mod tests {
         enc.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
         enc.set_payload(b"data");
         enc.set_header(HeaderParameter::Zip, "GZIP");
-        enc.set_key(&key);
-        assert!(enc.encrypt().is_err());
+        assert!(enc.encrypt(&key).is_err());
     }
 
     #[test]
@@ -1313,8 +1295,7 @@ mod tests {
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
         jwe.set_algorithm_constraints(&constraints);
-        jwe.set_key(&ec_key);
-        assert!(jwe.encrypt().is_err());
+        assert!(jwe.encrypt(&ec_key).is_err());
     }
 
     #[test]
@@ -1331,8 +1312,7 @@ mod tests {
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
         jwe.set_algorithm_constraints(&constraints);
-        jwe.set_key(&rsa_key);
-        assert!(jwe.encrypt().is_err());
+        assert!(jwe.encrypt(&rsa_key).is_err());
     }
 
     #[test]
@@ -1349,8 +1329,7 @@ mod tests {
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
         jwe.set_algorithm_constraints(&constraints);
-        jwe.set_key(&rsa_key);
-        jwe.encrypt().unwrap();
+        jwe.encrypt(&rsa_key).unwrap();
         let compact = jwe.compact_serialization().unwrap();
 
         let ec_key = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::EcdhEs)
@@ -1359,8 +1338,7 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_compact_serialization(&compact).unwrap();
         jwe.set_algorithm_constraints(&constraints);
-        jwe.set_key(&ec_key);
-        assert!(jwe.payload().is_err());
+        assert!(jwe.payload(&ec_key).is_err());
     }
 
     #[test]
@@ -1377,8 +1355,7 @@ mod tests {
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
         jwe.set_algorithm_constraints(&constraints);
-        jwe.set_key(&rsa_key);
-        assert!(jwe.encrypt().is_err());
+        assert!(jwe.encrypt(&rsa_key).is_err());
     }
 
     // -- malformed key-management input rejection -------------------------
@@ -1402,8 +1379,7 @@ mod tests {
             HeaderParameter::EncryptionMethod,
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
-        jwe.set_key(&key);
-        jwe.encrypt().unwrap();
+        jwe.encrypt(&key).unwrap();
         let compact = jwe.compact_serialization().unwrap();
         let segments = compact.split('.').map(str::to_string).collect();
         (key, segments)
@@ -1416,8 +1392,7 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(&compact).unwrap();
-        jwe.set_key(key);
-        jwe.payload().is_ok()
+        jwe.payload(key).is_ok()
     }
 
     #[test]
@@ -1436,8 +1411,7 @@ mod tests {
             HeaderParameter::EncryptionMethod,
             ContentEncryptionAlgorithm::Aes128Gcm.name(),
         );
-        jwe.set_key(&good_key);
-        jwe.encrypt().unwrap();
+        jwe.encrypt(&good_key).unwrap();
         let compact = jwe.compact_serialization().unwrap();
 
         let wrong_len_key = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A192Kw)
@@ -1446,8 +1420,7 @@ mod tests {
         let mut jwe = JsonWebEncryption::new();
         jwe.set_algorithm_constraints(&constraints);
         jwe.set_compact_serialization(&compact).unwrap();
-        jwe.set_key(&wrong_len_key);
-        assert!(jwe.payload().is_err());
+        assert!(jwe.payload(&wrong_len_key).is_err());
     }
 
     #[test]

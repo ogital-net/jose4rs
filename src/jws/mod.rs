@@ -71,7 +71,6 @@ fn header_b64_flag(header: &simd_json::owned::Value) -> Result<bool, JoseError> 
 ///   payload, and signature
 pub struct JsonWebSignature<'a> {
     buffer: Vec<u8>,
-    key: Option<&'a JsonWebKey>,
     verification_input: Option<BufferRef>,
     header: Option<simd_json::owned::Value>,
     payload: Option<BufferRef>,
@@ -93,7 +92,6 @@ impl std::fmt::Debug for JsonWebSignature<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JsonWebSignature")
             .field("alg", &self.algorithm())
-            .field("has_key", &self.key.is_some())
             .field("has_header", &self.header.is_some())
             .field("has_payload", &self.payload.is_some())
             .field("has_signature", &self.signature.is_some())
@@ -107,7 +105,6 @@ impl<'a> JsonWebSignature<'a> {
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
-            key: None,
             verification_input: None,
             header: None,
             payload: None,
@@ -140,7 +137,7 @@ impl<'a> JsonWebSignature<'a> {
     /// ).unwrap();
     /// ```
     pub fn from_compact_serialization(
-        compact_serialization: &'a (impl AsRef<[u8]> + ?Sized),
+        compact_serialization: &(impl AsRef<[u8]> + ?Sized),
     ) -> Result<Self, JoseError> {
         let mut jws = JsonWebSignature::new();
         jws.set_compact_serialization(compact_serialization)?;
@@ -203,32 +200,28 @@ impl<'a> JsonWebSignature<'a> {
     /// # use jose4rs::jwx::JsonWebStructure;
     /// # let mut jws = JsonWebSignature::from_compact_serialization("...").unwrap();
     /// # let key = JsonWebKey::from_pem("...").unwrap();
-    /// jws.set_key(&key);
-    /// if jws.verify_signature()? {
+    /// if jws.verify_signature(&key)? {
     ///     println!("Signature is valid");
     /// }
     /// # Ok::<(), jose4rs::error::JoseError>(())
     /// ```
-    pub fn verify_signature(&self) -> Result<bool, JoseError> {
+    pub fn verify_signature(&self, key: &JsonWebKey) -> Result<bool, JoseError> {
         // check algorithm constraints
         let alg = self.get_algorithm(true)?;
 
-        // handle 'none' algorithm
+        // handle 'none' algorithm: the key is irrelevant; validity is determined
+        // by whether the signature segment is empty.
         if alg == AlgorithmIdentifier::None {
-            if self.key.is_some() {
-                return Err(JoseError::InvalidKey(format!(
-                    "JWS Plaintext (alg={alg}) must not use a key."
-                )));
-            }
             let is_valid = match self.signature {
                 Some(ref signature) => signature.is_empty(),
                 None => false,
             };
+            let _ = key; // silence unused
             return Ok(is_valid);
         }
 
         // key preflight checks
-        let key = self.get_key_with_validation(alg)?;
+        validate_key_for_alg(key, alg)?;
 
         let signature = self
             .signature
@@ -416,8 +409,8 @@ impl<'a> JsonWebSignature<'a> {
     ///
     /// Returns an error if verification cannot be performed (missing key,
     /// disallowed algorithm, malformed structure, etc.).
-    pub fn verify(&self) -> Result<bool, JoseError> {
-        self.verify_signature()
+    pub fn verify(&self, key: &JsonWebKey) -> Result<bool, JoseError> {
+        self.verify_signature(key)
     }
 
     /// Returns the signature algorithm (`alg`) header value, if set.
@@ -431,7 +424,7 @@ impl<'a> JsonWebSignature<'a> {
     ///
     /// This method returns the payload **without** verifying the signature.
     /// Only use this when you trust the source or plan to verify the signature separately.
-    /// For most use cases, prefer using [`JsonWebStructure::payload`] which verifies the signature first.
+    /// For most use cases, prefer using [`JsonWebSignature::payload`] which verifies the signature first.
     ///
     /// # Errors
     ///
@@ -454,19 +447,20 @@ impl<'a> JsonWebSignature<'a> {
         Ok(payload.get(&self.buffer))
     }
 
-    fn sign(&self, alg: AlgorithmIdentifier, input: &[u8]) -> Result<Option<Box<[u8]>>, JoseError> {
-        // handle 'none' algorithm
+    fn sign(
+        &self,
+        alg: AlgorithmIdentifier,
+        input: &[u8],
+        key: &JsonWebKey,
+    ) -> Result<Option<Box<[u8]>>, JoseError> {
+        // handle 'none' algorithm: the key is irrelevant; emit an empty signature.
         if alg == AlgorithmIdentifier::None {
-            if self.key.is_some() {
-                return Err(JoseError::InvalidKey(format!(
-                    "JWS plaintext (alg={alg}) must not use a key"
-                )));
-            }
+            let _ = (key, input); // silence unused
             return Ok(None);
         }
 
         // key preflight checks
-        let key = self.get_key_with_validation(alg)?;
+        validate_key_for_alg(key, alg)?;
 
         let sig = match alg {
             AlgorithmIdentifier::HmacSha256 => match key {
@@ -624,89 +618,6 @@ impl<'a> JsonWebSignature<'a> {
             self.algorithm_constraints.check_constraint(alg)?;
         }
         Ok(alg)
-    }
-
-    fn get_key_with_validation(
-        &self,
-        alg: AlgorithmIdentifier,
-    ) -> Result<&'a JsonWebKey, JoseError> {
-        match self.key {
-            Some(key) => {
-                // RFC 7517 Section 4.4: a key with an `alg` member is intended only
-                // for that algorithm. Reject same-family algorithm drift (e.g.
-                // a key tagged HS256 verifying HS384).
-                if let Some(key_alg) = key.algorithm() {
-                    if key_alg != alg.name() {
-                        return Err(JoseError::InvalidKey(format!(
-                            "key is restricted to algorithm '{key_alg}' but the JWS uses '{alg}'"
-                        )));
-                    }
-                }
-                match key {
-                    JsonWebKey::Rsa(rsa_key) => {
-                        if rsa_key.key_size_bits() < MIN_RSA_KEY_BITS {
-                            return Err(JoseError::InvalidKey(format!(
-                                "an RSA key of size {MIN_RSA_KEY_BITS} bits or larger MUST be used with the all JOSE \
-                                RSA algorithms (given key was only {} bits)",
-                                rsa_key.key_size_bits()
-                            )));
-                        }
-                        Ok(key)
-                    }
-                    JsonWebKey::Oct(oct_key) => {
-                        // RFC 7518 Section 3.2: an HMAC key of the same size as the hash
-                        // output or larger MUST be used. jose4j enforces the same
-                        // minimum in validateKey().
-                        let min_bits = match alg {
-                            AlgorithmIdentifier::HmacSha256 => 256,
-                            AlgorithmIdentifier::HmacSha384 => 384,
-                            AlgorithmIdentifier::HmacSha512 => 512,
-                            _ => 0, // not an HMAC algorithm; no symmetric minimum
-                        };
-                        if oct_key.key_size_bits() < min_bits {
-                            return Err(JoseError::InvalidKey(format!(
-                            "a key of the same size as the hash output (i.e. {min_bits} bits for \
-                            {alg}) or larger MUST be used with the HMAC SHA algorithms but this \
-                            key is only {} bits",
-                            oct_key.key_size_bits()
-                        )));
-                        }
-                        Ok(key)
-                    }
-                    JsonWebKey::EllipticCurve(ec_key) => {
-                        // RFC 7518 Section 3.4: each ECDSA algorithm pins a
-                        // specific curve. Reject a key whose curve doesn't match
-                        // (e.g. a P-384 key used with ES256), as jose4j's
-                        // EcdsaUsingShaAlgorithm.validateKeySpec() does.
-                        if let Some(required_curve) = alg.ec_curve() {
-                            if ec_key.curve_name() != required_curve {
-                                return Err(JoseError::InvalidKey(format!(
-                                    "key curve '{}' does not match the curve '{required_curve}' required by {alg}",
-                                    ec_key.curve_name()
-                                )));
-                            }
-                        }
-                        Ok(key)
-                    }
-                    JsonWebKey::OctetKeyPair(okp_key) => {
-                        // EdDSA signs and verifies with an Edwards-curve key
-                        // (Ed25519 here). An X25519 key is for ECDH key
-                        // agreement only and cannot sign/verify; reject it up
-                        // front with a descriptive error rather than letting it
-                        // reach the signing/verification primitive, where it
-                        // would fail to initialize.
-                        if alg == AlgorithmIdentifier::EdDsa && okp_key.curve_name() != "Ed25519" {
-                            return Err(JoseError::InvalidKey(format!(
-                                "key curve '{}' cannot be used with {alg}; an Ed25519 key is required",
-                                okp_key.curve_name()
-                            )));
-                        }
-                        Ok(key)
-                    }
-                }
-            }
-            None => Err(JoseError::new("missing key")),
-        }
     }
 
     /// Sets the signature algorithm in the JWS header.
@@ -962,12 +873,11 @@ impl<'a> JsonWebSignature<'a> {
     /// # use jose4rs::jwx::JsonWebStructure;
     /// # let mut jws = JsonWebSignature::from_compact_serialization("...").unwrap();
     /// # let key = JsonWebKey::from_pem("...").unwrap();
-    /// jws.set_key(&key);
     /// jws.set_algorithm(AlgorithmIdentifier::RsaUsingSha256);
-    /// let json = jws.flattened_json_serialization()?;
+    /// let json = jws.flattened_json_serialization(&key)?;
     /// # Ok::<(), jose4rs::error::JoseError>(())
     /// ```
-    pub fn flattened_json_serialization(&self) -> Result<String, JoseError> {
+    pub fn flattened_json_serialization(&self, key: &JsonWebKey) -> Result<String, JoseError> {
         // check algorithm constraints
         let alg = self.get_algorithm(true)?;
 
@@ -1034,7 +944,7 @@ impl<'a> JsonWebSignature<'a> {
             self.build_unencoded_signing_input()?
         };
 
-        let sig = self.sign(alg, &signing_input)?;
+        let sig = self.sign(alg, &signing_input, key)?;
         match sig {
             Some(sig) => {
                 let s = base64::url_encode_append(sig, &mut out_buffer);
@@ -1050,60 +960,37 @@ impl<'a> JsonWebSignature<'a> {
 
         Ok(out.encode())
     }
-}
 
-impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
-    fn set_compact_serialization(
-        &mut self,
-        compact_serialization: &'a (impl AsRef<[u8]> + ?Sized),
-    ) -> Result<(), JoseError> {
-        let compact_serialization = compact_serialization.as_ref();
-
-        let delimeter_indexes = {
-            let mut iter = memchr::memchr_iter(b'.', compact_serialization);
-
-            let mut indexes = [0usize; 2];
-            for idx in &mut indexes {
-                match iter.next() {
-                    Some(i) => *idx = i,
-                    None => return Err(JoseError::MalformedToken("not enough parts".into())),
-                }
-            }
-            if iter.next().is_some() {
-                return Err(JoseError::MalformedToken("too many parts".into()));
-            }
-            indexes
-        };
-
-        let (protected_header, encoded_payload, encoded_signature, verification_input) =
-            // SAFETY: these indexes are checked above
-            unsafe {
-                (compact_serialization.get_unchecked(..delimeter_indexes[0]),
-                compact_serialization.get_unchecked((delimeter_indexes[0] + 1)..delimeter_indexes[1]),
-                compact_serialization.get_unchecked((delimeter_indexes[1] + 1)..),
-                compact_serialization.get_unchecked(..delimeter_indexes[1]))
-            };
-        let need = std::cmp::max(
-            base64::url_decode_size(protected_header.len()),
-            verification_input.len()
-                + base64::url_decode_size(encoded_payload.len())
-                + base64::url_decode_size(encoded_signature.len()),
-        );
-        self.buffer.reserve_exact(need);
-
-        let start = self.buffer.len();
-        self.buffer.extend_from_slice(verification_input);
-        let verification_input = BufferRef::new(start, self.buffer.len());
-
-        self.set_parts(
-            protected_header,
-            encoded_payload,
-            encoded_signature,
-            verification_input,
-        )
+    /// Returns the payload after verifying the signature with `key`.
+    ///
+    /// This is the natural read path for a JWS: parse, verify, then read.
+    /// [`unverified_payload`](Self::unverified_payload) is available if the
+    /// caller needs the bytes without verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the signature is invalid, the key is incompatible
+    /// with the algorithm, or the payload is absent.
+    pub fn payload(&self, key: &JsonWebKey) -> Result<&[u8], JoseError> {
+        if !self.verify_signature(key)? {
+            return Err(JoseError::IntegrityError("JWS signature is invalid".into()));
+        }
+        let payload = self
+            .payload
+            .as_ref()
+            .ok_or_else(|| JoseError::new("missing payload"))?;
+        Ok(payload.get(&self.buffer))
     }
 
-    fn compact_serialization(&self) -> Result<String, JoseError> {
+    /// Produces the JWS compact serialization, signing with `key`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the header is missing, the algorithm is not
+    /// allowed by constraints, the key is incompatible with the algorithm, or
+    /// signing fails. `b64=false` is not supported in compact serialization
+    /// (use [`flattened_json_serialization`](Self::flattened_json_serialization)).
+    pub fn compact_serialization(&self, key: &JsonWebKey) -> Result<String, JoseError> {
         // check algorithm constraints
         let alg = self.get_algorithm(true)?;
 
@@ -1153,7 +1040,7 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
             | AlgorithmIdentifier::RsaPssUsingSha256
             | AlgorithmIdentifier::RsaPssUsingSha384
             | AlgorithmIdentifier::RsaPssUsingSha512 => {
-                if let Some(JsonWebKey::Rsa(rsa)) = self.key {
+                if let JsonWebKey::Rsa(rsa) = key {
                     need += base64::url_encode_size(rsa.key_size_bits() / 8);
                 }
             }
@@ -1166,7 +1053,7 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
             base64::url_encode_append(payload.get(&self.buffer), &mut out);
         }
 
-        let sig = self.sign(alg, &out)?;
+        let sig = self.sign(alg, &out, key)?;
         out.push(b'.');
 
         if let Some(sig) = sig {
@@ -1176,22 +1063,145 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         // SAFETY: base64 encoding is valid UTF-8
         unsafe { Ok(String::from_utf8_unchecked(out)) }
     }
+}
+
+/// Validates that `key` is appropriate for `alg` (RFC 7517 Section 4.4 and
+/// RFC 7518 Sections 3.2/3.4). Returns `Ok(())` if the key is usable, or an
+/// `InvalidKey` error describing the mismatch.
+///
+/// Extracted as a free function so the same checks apply whether the caller is
+/// verifying, signing, or producing a compact serialization -- no need to
+/// duplicate the validation at each call site.
+fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<(), JoseError> {
+    // RFC 7517 Section 4.4: a key with an `alg` member is intended only
+    // for that algorithm. Reject same-family algorithm drift (e.g.
+    // a key tagged HS256 verifying HS384).
+    if let Some(key_alg) = key.algorithm() {
+        if key_alg != alg.name() {
+            return Err(JoseError::InvalidKey(format!(
+                "key is restricted to algorithm '{key_alg}' but the JWS uses '{alg}'"
+            )));
+        }
+    }
+    match key {
+        JsonWebKey::Rsa(rsa_key) => {
+            if rsa_key.key_size_bits() < MIN_RSA_KEY_BITS {
+                return Err(JoseError::InvalidKey(format!(
+                    "an RSA key of size {MIN_RSA_KEY_BITS} bits or larger MUST be used with the all JOSE \
+                    RSA algorithms (given key was only {} bits)",
+                    rsa_key.key_size_bits()
+                )));
+            }
+            Ok(())
+        }
+        JsonWebKey::Oct(oct_key) => {
+            // RFC 7518 Section 3.2: an HMAC key of the same size as the hash
+            // output or larger MUST be used. jose4j enforces the same
+            // minimum in validateKey().
+            let min_bits = match alg {
+                AlgorithmIdentifier::HmacSha256 => 256,
+                AlgorithmIdentifier::HmacSha384 => 384,
+                AlgorithmIdentifier::HmacSha512 => 512,
+                _ => 0, // not an HMAC algorithm; no symmetric minimum
+            };
+            if oct_key.key_size_bits() < min_bits {
+                return Err(JoseError::InvalidKey(format!(
+                    "a key of the same size as the hash output (i.e. {min_bits} bits for \
+                    {alg}) or larger MUST be used with the HMAC SHA algorithms but this \
+                    key is only {} bits",
+                    oct_key.key_size_bits()
+                )));
+            }
+            Ok(())
+        }
+        JsonWebKey::EllipticCurve(ec_key) => {
+            // RFC 7518 Section 3.4: each ECDSA algorithm pins a
+            // specific curve. Reject a key whose curve doesn't match
+            // (e.g. a P-384 key used with ES256), as jose4j's
+            // EcdsaUsingShaAlgorithm.validateKeySpec() does.
+            if let Some(required_curve) = alg.ec_curve() {
+                if ec_key.curve_name() != required_curve {
+                    return Err(JoseError::InvalidKey(format!(
+                        "key curve '{}' does not match the curve '{required_curve}' required by {alg}",
+                        ec_key.curve_name()
+                    )));
+                }
+            }
+            Ok(())
+        }
+        JsonWebKey::OctetKeyPair(okp_key) => {
+            // EdDSA signs and verifies with an Edwards-curve key
+            // (Ed25519 here). An X25519 key is for ECDH key
+            // agreement only and cannot sign/verify; reject it up
+            // front with a descriptive error rather than letting it
+            // reach the signing/verification primitive, where it
+            // would fail to initialize.
+            if alg == AlgorithmIdentifier::EdDsa && okp_key.curve_name() != "Ed25519" {
+                return Err(JoseError::InvalidKey(format!(
+                    "key curve '{}' cannot be used with {alg}; an Ed25519 key is required",
+                    okp_key.curve_name()
+                )));
+            }
+            Ok(())
+        }
+    }
+}
+
+impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
+    fn set_compact_serialization(
+        &mut self,
+        compact_serialization: &(impl AsRef<[u8]> + ?Sized),
+    ) -> Result<(), JoseError> {
+        let compact_serialization = compact_serialization.as_ref();
+
+        let delimeter_indexes = {
+            let mut iter = memchr::memchr_iter(b'.', compact_serialization);
+
+            let mut indexes = [0usize; 2];
+            for idx in &mut indexes {
+                match iter.next() {
+                    Some(i) => *idx = i,
+                    None => return Err(JoseError::MalformedToken("not enough parts".into())),
+                }
+            }
+            if iter.next().is_some() {
+                return Err(JoseError::MalformedToken("too many parts".into()));
+            }
+            indexes
+        };
+
+        let (protected_header, encoded_payload, encoded_signature, verification_input) =
+            // SAFETY: these indexes are checked above
+            unsafe {
+                (compact_serialization.get_unchecked(..delimeter_indexes[0]),
+                compact_serialization.get_unchecked((delimeter_indexes[0] + 1)..delimeter_indexes[1]),
+                compact_serialization.get_unchecked((delimeter_indexes[1] + 1)..),
+                compact_serialization.get_unchecked(..delimeter_indexes[1]))
+            };
+        let need = std::cmp::max(
+            base64::url_decode_size(protected_header.len()),
+            verification_input.len()
+                + base64::url_decode_size(encoded_payload.len())
+                + base64::url_decode_size(encoded_signature.len()),
+        );
+        self.buffer.reserve_exact(need);
+
+        let start = self.buffer.len();
+        self.buffer.extend_from_slice(verification_input);
+        let verification_input = BufferRef::new(start, self.buffer.len());
+
+        self.set_parts(
+            protected_header,
+            encoded_payload,
+            encoded_signature,
+            verification_input,
+        )
+    }
 
     fn set_payload(&mut self, payload: impl AsRef<[u8]>) {
         let start = self.buffer.len();
         self.buffer.extend_from_slice(payload.as_ref());
         self.payload = Some(BufferRef::new(start, self.buffer.len()));
-    }
-
-    fn payload(&mut self) -> Result<&[u8], JoseError> {
-        if !self.verify_signature()? {
-            return Err(JoseError::IntegrityError("JWS signature is invalid".into()));
-        }
-        let payload = self
-            .payload
-            .as_ref()
-            .ok_or_else(|| JoseError::new("missing payload"))?;
-        Ok(payload.get(&self.buffer))
     }
 
     fn set_header_value(&mut self, name: impl Into<String>, value: simd_json::owned::Value) {
@@ -1211,14 +1221,6 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         }
     }
 
-    fn set_key(&mut self, key: &'a JsonWebKey) {
-        self.key = Some(key);
-    }
-
-    fn key(&self) -> Option<&'a JsonWebKey> {
-        self.key
-    }
-
     fn set_algorithm_constraints(
         &mut self,
         algorithm_constraints: &'a AlgorithmConstraints<AlgorithmIdentifier>,
@@ -1227,7 +1229,7 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
     }
 }
 
-impl<'a> Default for JsonWebSignature<'a> {
+impl Default for JsonWebSignature<'_> {
     fn default() -> Self {
         Self::new()
     }
@@ -1275,8 +1277,7 @@ mod tests {
 
         jws.set_compact_serialization(compact_serialization)
             .unwrap();
-        jws.set_key(&jwk);
-        assert!(jws.verify_signature().unwrap());
+        assert!(jws.verify_signature(&jwk).unwrap());
     }
 
     #[test]
@@ -1299,8 +1300,7 @@ mod tests {
 
         jws.set_compact_serialization(compact_serialization)
             .unwrap();
-        jws.set_key(&jwk);
-        assert!(jws.verify_signature().unwrap());
+        assert!(jws.verify_signature(&jwk).unwrap());
     }
 
     #[test]
@@ -1318,9 +1318,8 @@ mod tests {
 
         jws.set_compact_serialization(compact_serialization)
             .unwrap();
-        jws.set_key(&jwk);
 
-        assert!(jws.verify_signature().unwrap());
+        assert!(jws.verify_signature(&jwk).unwrap());
     }
 
     #[test]
@@ -1340,9 +1339,8 @@ mod tests {
 
         jws.set_compact_serialization(compact_serialization)
             .unwrap();
-        jws.set_key(&jwk);
 
-        assert!(jws.verify_signature().unwrap());
+        assert!(jws.verify_signature(&jwk).unwrap());
     }
 
     #[test]
@@ -1358,8 +1356,7 @@ mod tests {
 
         jws.set_compact_serialization(compact_serialization)
             .unwrap();
-        jws.set_key(&jwk);
-        assert!(jws.verify_signature().unwrap());
+        assert!(jws.verify_signature(&jwk).unwrap());
     }
 
     #[test]
@@ -1372,7 +1369,6 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&key);
         jws.set_jwk_header(&key);
 
         // Inspect the in-memory protected header directly.
@@ -1382,7 +1378,7 @@ mod tests {
         assert_eq!(jwk_val.get_str("kty"), Some("oct"));
 
         // And it must survive a flattened serialize/parse round-trip.
-        let json = jws.flattened_json_serialization().unwrap();
+        let json = jws.flattened_json_serialization(&key).unwrap();
         let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
         let header = parsed.header.as_ref().unwrap();
         assert!(header.get("jwk").unwrap().is_object());
@@ -1408,10 +1404,9 @@ mod tests {
             r#"{{"protected":"{protected}","payload":"JC4wMg","signature":"{expected_sig}"}}"#
         );
 
-        let mut jws = JsonWebSignature::from_flattened_json_serialization(&flattened).unwrap();
-        jws.set_key(&key);
+        let jws = JsonWebSignature::from_flattened_json_serialization(&flattened).unwrap();
         assert!(
-            jws.verify_signature().unwrap(),
+            jws.verify_signature(&key).unwrap(),
             "RFC 7797 Appendix A signature must verify"
         );
         // The payload round-trips as the raw bytes $.02.
@@ -1429,19 +1424,16 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"$.02");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&key);
         jws.set_b64(false);
 
-        let json = jws.flattened_json_serialization().unwrap();
+        let json = jws.flattened_json_serialization(&key).unwrap();
 
         // The protected header must carry b64:false + crit:["b64"].
         let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
         let header = parsed.header.as_ref().unwrap();
         assert_eq!(header.get("b64").unwrap().as_bool(), Some(false));
 
-        let mut parsed = parsed;
-        parsed.set_key(&key);
-        assert!(parsed.verify_signature().unwrap());
+        assert!(parsed.verify_signature(&key).unwrap());
         assert_eq!(parsed.unverified_payload().unwrap(), b"$.02");
     }
 
@@ -1455,11 +1447,10 @@ mod tests {
 
         let mut jws = JsonWebSignature::new();
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&key);
         jws.set_b64(false);
         jws.set_detached_payload(b"$.02");
 
-        let json = jws.flattened_json_serialization().unwrap();
+        let json = jws.flattened_json_serialization(&key).unwrap();
         // Detached => no "payload" member in the JSON.
         assert!(
             !json.contains("\"payload\""),
@@ -1470,14 +1461,12 @@ mod tests {
         let mut parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
         parsed.set_b64(false); // parse records b64=false from the header already
         parsed.set_detached_payload(b"$.02");
-        parsed.set_key(&key);
-        assert!(parsed.verify_signature().unwrap());
+        assert!(parsed.verify_signature(&key).unwrap());
 
         // A tampered payload must fail.
         let mut bad = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
         bad.set_detached_payload(b"$.03");
-        bad.set_key(&key);
-        assert!(!bad.verify_signature().unwrap());
+        assert!(!bad.verify_signature(&key).unwrap());
     }
 
     /// b64=false without crit listing b64 must be rejected (RFC 7797 Section 3).
@@ -1518,9 +1507,8 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&key);
         jws.set_b64(false);
-        assert!(jws.compact_serialization().is_err());
+        assert!(jws.compact_serialization(&key).is_err());
     }
 
     #[test]
@@ -1547,13 +1535,10 @@ mod tests {
             let payload = b"hello world";
             jws.set_payload(payload);
             jws.set_algorithm(alg);
-            jws.set_key(&key);
 
-            let compact_serialization = jws.compact_serialization().unwrap();
-            let mut jws =
-                JsonWebSignature::from_compact_serialization(&compact_serialization).unwrap();
-            jws.set_key(&key);
-            assert_eq!(jws.payload().unwrap(), payload);
+            let compact_serialization = jws.compact_serialization(&key).unwrap();
+            let jws = JsonWebSignature::from_compact_serialization(&compact_serialization).unwrap();
+            assert_eq!(jws.payload(&key).unwrap(), payload);
         }
     }
 
@@ -1581,13 +1566,11 @@ mod tests {
             let payload = b"hello world";
             jws.set_payload(payload);
             jws.set_algorithm(alg);
-            jws.set_key(&key);
 
-            let json_serialization = jws.flattened_json_serialization().unwrap();
-            let mut jws =
+            let json_serialization = jws.flattened_json_serialization(&key).unwrap();
+            let jws =
                 JsonWebSignature::from_flattened_json_serialization(&json_serialization).unwrap();
-            jws.set_key(&key);
-            assert_eq!(jws.payload().unwrap(), payload);
+            assert_eq!(jws.payload(&key).unwrap(), payload);
         }
     }
 
@@ -1602,15 +1585,13 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&good_key);
-        let compact = jws.compact_serialization().unwrap();
+        let compact = jws.compact_serialization(&good_key).unwrap();
 
         // An oct JWK whose `k` decodes to fewer than 32 bytes (HS256 minimum).
         let short_key =
             JsonWebKey::from_json(r#"{"kty":"oct","alg":"HS256","k":"c2hvcnQ"}"#).unwrap();
-        let mut jws = JsonWebSignature::from_compact_serialization(&compact).unwrap();
-        jws.set_key(&short_key);
-        let result = jws.verify_signature();
+        let jws = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+        let result = jws.verify_signature(&short_key);
         assert!(
             matches!(result, Err(JoseError::InvalidKey(_))),
             "{result:?}"
@@ -1620,8 +1601,7 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&short_key);
-        let result = jws.compact_serialization();
+        let result = jws.compact_serialization(&short_key);
         assert!(
             matches!(result, Err(JoseError::InvalidKey(_))),
             "{result:?}"
@@ -1633,10 +1613,6 @@ mod tests {
     #[test]
     fn test_ec_curve_mismatch_rejected() {
         // Sign with ES256 (P-256) but hand the verifier a P-384 key.
-        let p256_key =
-            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
-                .generate()
-                .unwrap();
         let p384_key =
             JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384)
                 .generate()
@@ -1645,27 +1621,30 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
-        jws.set_key(&p256_key);
-        let compact = jws.compact_serialization().unwrap();
 
-        // Verify with the wrong-curve (P-384) key: must error, not just fail.
-        let mut parsed = JsonWebSignature::from_compact_serialization(&compact).unwrap();
-        parsed.set_key(&p384_key);
-        let result = parsed.verify_signature();
+        // The wrong-curve key must be rejected at sign time.
+        let compact = jws.compact_serialization(&p384_key);
         assert!(
-            matches!(result, Err(JoseError::InvalidKey(_))),
-            "expected InvalidKey, got {result:?}"
+            matches!(compact, Err(JoseError::InvalidKey(_))),
+            "expected InvalidKey on sign, got {compact:?}"
         );
 
-        // Signing with a wrong-curve key must also error (no panic).
-        let mut bad = JsonWebSignature::new();
-        bad.set_payload(b"hello");
-        bad.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
-        bad.set_key(&p384_key);
-        let result = bad.compact_serialization();
+        // For verify, we need a valid token first; use the correct-curve key
+        // to sign, then try to verify with the wrong-curve (P-384) key.
+        let correct_key =
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
+                .generate()
+                .unwrap();
+        let mut good = JsonWebSignature::new();
+        good.set_payload(b"hello");
+        good.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
+        let compact = good.compact_serialization(&correct_key).unwrap();
+
+        let parsed = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+        let result = parsed.verify_signature(&p384_key);
         assert!(
             matches!(result, Err(JoseError::InvalidKey(_))),
-            "expected InvalidKey on sign, got {result:?}"
+            "expected InvalidKey on verify, got {result:?}"
         );
     }
 
@@ -1679,13 +1658,12 @@ mod tests {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"hello");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&key);
         jws.set_b64(false);
         jws.set_detached_payload(b"hello");
         // Now flip back to the default encoded form.
         jws.set_b64(true);
 
-        let json = jws.flattened_json_serialization().unwrap();
+        let json = jws.flattened_json_serialization(&key).unwrap();
         // The header must not carry a `crit` referencing a now-absent `b64`.
         assert!(
             !json.contains("\"crit\""),
@@ -1696,9 +1674,8 @@ mod tests {
             "b64 header should be removed: {json}"
         );
         // And it must verify cleanly with the attached payload.
-        let mut parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
-        parsed.set_key(&key);
-        assert!(parsed.verify_signature().unwrap());
+        let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+        assert!(parsed.verify_signature(&key).unwrap());
     }
 
     #[test]
@@ -1717,44 +1694,51 @@ mod tests {
     fn test_none_sign_verify_round_trip() {
         let permit_none =
             AlgorithmConstraints::new(ConstraintType::Permit, [AlgorithmIdentifier::None]);
+        // The API requires a key for sign/verify/payload, but for 'none' the
+        // key is ignored. Generate a placeholder so we have one in scope.
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"unsecured payload");
         jws.set_algorithm(AlgorithmIdentifier::None);
         jws.set_algorithm_constraints(&permit_none);
-        let compact = jws.compact_serialization().unwrap();
+        let compact = jws.compact_serialization(&key).unwrap();
 
         assert!(compact.ends_with('.'));
 
         let mut jws = JsonWebSignature::from_compact_serialization(&compact).unwrap();
         jws.set_algorithm_constraints(&permit_none);
-        assert!(jws.verify_signature().unwrap());
-        assert_eq!(jws.payload().unwrap(), b"unsecured payload");
+        assert!(jws.verify_signature(&key).unwrap());
+        assert_eq!(jws.payload(&key).unwrap(), b"unsecured payload");
     }
 
     #[test]
-    fn test_none_verify_rejects_key() {
+    fn test_none_verify_accepts_key() {
+        // The 'none' algorithm doesn't use a key, but the API now requires
+        // passing one. The key is ignored -- verify succeeds when the
+        // signature segment is empty.
         let permit_none =
             AlgorithmConstraints::new(ConstraintType::Permit, [AlgorithmIdentifier::None]);
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
         let mut jws = JsonWebSignature::new();
         jws.set_payload(b"payload");
         jws.set_algorithm(AlgorithmIdentifier::None);
         jws.set_algorithm_constraints(&permit_none);
-        let compact = jws.compact_serialization().unwrap();
+        let compact = jws.compact_serialization(&key).unwrap();
 
-        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
-            .generate()
-            .unwrap();
         let mut jws = JsonWebSignature::from_compact_serialization(&compact).unwrap();
         jws.set_algorithm_constraints(&permit_none);
-        jws.set_key(&key);
-        assert!(matches!(
-            jws.verify_signature(),
-            Err(JoseError::InvalidKey(_))
-        ));
+        assert!(jws.verify_signature(&key).unwrap());
     }
 
     #[test]
-    fn test_none_sign_rejects_key() {
+    fn test_none_sign_accepts_key() {
+        // The 'none' algorithm doesn't use a key, but the API requires
+        // passing one. The key is ignored -- sign still produces an
+        // unsecured token.
         let permit_none =
             AlgorithmConstraints::new(ConstraintType::Permit, [AlgorithmIdentifier::None]);
         let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
@@ -1764,11 +1748,8 @@ mod tests {
         jws.set_payload(b"payload");
         jws.set_algorithm(AlgorithmIdentifier::None);
         jws.set_algorithm_constraints(&permit_none);
-        jws.set_key(&key);
-        assert!(matches!(
-            jws.compact_serialization(),
-            Err(JoseError::InvalidKey(_))
-        ));
+        let compact = jws.compact_serialization(&key).unwrap();
+        assert!(compact.ends_with('.'));
     }
 
     #[test]
@@ -1782,9 +1763,12 @@ mod tests {
             enc(b"payload"),
             enc(b"fake-signature")
         );
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
         let mut jws = JsonWebSignature::from_compact_serialization(&compact).unwrap();
         jws.set_algorithm_constraints(&permit_none);
-        assert!(!jws.verify_signature().unwrap());
+        assert!(!jws.verify_signature(&key).unwrap());
     }
 
     // -- flattened JSON error paths --------------------------------------

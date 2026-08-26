@@ -1,4 +1,4 @@
-use crate::{error::JoseError, jwa::AlgorithmConstraints, jwk::JsonWebKey};
+use crate::{error::JoseError, jwa::AlgorithmConstraints};
 use simd_json::{
     base::{ValueAsArray as _, ValueAsScalar as _},
     prelude::ValueObjectAccess,
@@ -13,8 +13,15 @@ pub use header_param::HeaderParameter;
 ///
 /// The trait is generic over the algorithm type `A` used for algorithm
 /// constraints ([`crate::jws::AlgorithmIdentifier`] for JWS,
-/// [`crate::jwe::KeyManagementAlgorithm`] for JWE), and parameterized by the
-/// lifetime `'a` of the borrowed key and constraints.
+/// [`crate::jwe::KeyManagementAlgorithm`] for JWE).
+///
+/// Per-type methods that need a key (signing, verifying, encrypting,
+/// decrypting, producing a signed/encrypted serialization) take the key as a
+/// method parameter on the concrete type, so the trait does not depend on
+/// the key's lifetime. This lets `JsonWebSignature` and `JsonWebEncryption` be
+/// stored and shared without dragging the key's lifetime through them. The
+/// trait still carries the lifetime of the algorithm constraints reference,
+/// which is typically `'static`.
 pub trait JsonWebStructure<'a, A> {
     /// Parses and replaces the structure's contents from a compact serialization.
     ///
@@ -22,27 +29,11 @@ pub trait JsonWebStructure<'a, A> {
     /// Returns an error if the serialization is malformed.
     fn set_compact_serialization(
         &mut self,
-        compact_serialization: &'a (impl AsRef<[u8]> + ?Sized),
+        compact_serialization: &(impl AsRef<[u8]> + ?Sized),
     ) -> Result<(), JoseError>;
-
-    /// Produces the compact serialization of the structure.
-    ///
-    /// For a JWS this signs the payload; for a JWE it encrypts it.
-    ///
-    /// # Errors
-    /// Returns an error if the structure is incomplete or signing/encryption fails.
-    fn compact_serialization(&self) -> Result<String, JoseError>;
 
     /// Sets the payload to be signed or encrypted.
     fn set_payload(&mut self, payload: impl AsRef<[u8]>);
-
-    /// Returns the payload.
-    ///
-    /// For a JWS this verifies the signature first; for a JWE it decrypts first.
-    ///
-    /// # Errors
-    /// Returns an error if verification/decryption fails or the payload is absent.
-    fn payload(&mut self) -> Result<&[u8], JoseError>;
 
     /// Sets a typed header parameter to a string value.
     fn set_header(&mut self, param: HeaderParameter, value: impl Into<String>) {
@@ -112,12 +103,6 @@ pub trait JsonWebStructure<'a, A> {
     fn key_id_header_value(&self) -> Option<&str> {
         self.header(HeaderParameter::KeyId)
     }
-
-    /// Sets the key used to verify/decrypt or sign/encrypt.
-    fn set_key(&mut self, key: &'a JsonWebKey);
-
-    /// Returns the currently configured key, if any.
-    fn key(&self) -> Option<&'a JsonWebKey>;
 
     /// Restricts which algorithms this structure will accept.
     fn set_algorithm_constraints(&mut self, algorithm_constraints: &'a AlgorithmConstraints<A>);

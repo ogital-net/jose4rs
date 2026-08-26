@@ -18,13 +18,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut signer = JsonWebSignature::new();
     signer.set_payload("This is some text that is to be signed.");
     signer.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
-    signer.set_key(&signing_jwk);
 
     // The complete JWS representation, or compact serialization, is a string
     // consisting of three dot ('.') separated base64url-encoded parts in the
     // form Header.Payload.Signature. This is what would be received over the
     // wire.
-    let compact_serialization = signer.compact_serialization()?;
+    let compact_serialization = signer.compact_serialization(&signing_jwk)?;
     println!("JWS compact serialization: {compact_serialization}");
 
     // The public half of the signing key, as the receiver would obtain it
@@ -45,19 +44,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set the compact serialization on the JWS.
     jws.set_compact_serialization(&compact_serialization)?;
 
-    // Set the verification key.
-    // Note that your application will need to determine where/how to get the key.
-    jws.set_key(&public_jwk);
-
     // Check the signature.
-    let signature_verified = jws.verify_signature()?;
+    let signature_verified = jws.verify_signature(&public_jwk)?;
 
     // Do something useful with the result of signature verification.
     println!("JWS Signature is valid: {signature_verified}");
     assert!(signature_verified);
 
     // Get the payload, or signed content, from the JWS.
-    let payload = String::from_utf8_lossy(jws.payload()?);
+    let payload = String::from_utf8_lossy(jws.payload(&public_jwk)?);
 
     // Do something useful with the content.
     println!("JWS payload: {payload}");

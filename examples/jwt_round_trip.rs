@@ -45,9 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The payload of the JWS is JSON content of the JWT Claims.
     jws.set_payload(claims.to_json());
 
-    // The JWT is signed using the private key.
-    jws.set_key(&rsa_json_web_key);
-
     // Set the Key ID (kid) header because it's just the polite thing to do.
     // We only have one key in this example but using a Key ID helps facilitate
     // a smooth key rollover process.
@@ -63,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If you wanted to encrypt it, you can simply set this jwt as the payload
     // of a JsonWebEncryption object and set the cty (Content Type) header to
     // "jwt".
-    let jwt = jws.compact_serialization()?;
+    let jwt = jws.compact_serialization(&rsa_json_web_key)?;
 
     // Now you can do something with the JWT. Like send it to some other party
     // over the clouds and through the interwebs.
@@ -80,11 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut verifier = JsonWebSignature::new();
     verifier.set_algorithm_constraints(&constraints);
     verifier.set_compact_serialization(&jwt)?;
-    verifier.set_key(&rsa_json_web_key);
-    if !verifier.verify_signature()? {
+    if !verifier.verify_signature(&rsa_json_web_key)? {
         return Err("invalid JWS signature".into());
     }
-    let verified_claims_json = String::from_utf8(verifier.payload()?.to_vec())?;
+    let verified_claims_json = String::from_utf8(verifier.payload(&rsa_json_web_key)?.to_vec())?;
 
     // Then validate the claims. The specific validation requirements for a JWT
     // are context dependent, however, it is typically advisable to require a

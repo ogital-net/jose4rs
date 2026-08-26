@@ -31,10 +31,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut jws = JsonWebSignature::new();
     jws.set_payload(claims.to_json());
-    jws.set_key(&rsa_json_web_key);
     jws.set_key_id_header_value("k1");
     jws.set_algorithm(AlgorithmIdentifier::RsaUsingSha256);
-    let jwt = jws.compact_serialization()?;
+    let jwt = jws.compact_serialization(&rsa_json_web_key)?;
     println!("JWT: {jwt}");
 
     // --- First pass: parse without verifying ---
@@ -73,11 +72,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut second_pass_jws = JsonWebSignature::new();
     second_pass_jws.set_algorithm_constraints(&algorithm_constraints);
     second_pass_jws.set_compact_serialization(&jwt)?;
-    second_pass_jws.set_key(verification_key);
-    if !second_pass_jws.verify_signature()? {
+    if !second_pass_jws.verify_signature(verification_key)? {
         return Err("invalid JWS signature".into());
     }
-    let verified_claims_json = String::from_utf8(second_pass_jws.payload()?.to_vec())?;
+    let verified_claims_json =
+        String::from_utf8(second_pass_jws.payload(verification_key)?.to_vec())?;
 
     // And validate the claims.
     let second_pass_consumer = JwtConsumerBuilder::new()

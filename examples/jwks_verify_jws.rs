@@ -62,15 +62,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The verification key on the JWS is the public key from the JWK we pulled
     // from the JWK Set.
-    jws.set_key(jwk);
 
     // Check the signature.
-    let signature_verified = jws.verify_signature()?;
+    let signature_verified = jws.verify_signature(jwk)?;
     println!("JWS Signature is valid: {signature_verified}");
     assert!(signature_verified);
 
     // Get the payload, or signed content, from the JWS.
-    let payload = String::from_utf8_lossy(jws.payload()?);
+    let payload = String::from_utf8_lossy(jws.payload(jwk)?);
     println!("JWS payload: {payload}");
 
     Ok(())

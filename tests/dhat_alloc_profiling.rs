@@ -76,17 +76,15 @@ fn profile_jws_hs256_sign_verify() {
     let mut jws = JsonWebSignature::new();
     jws.set_payload(b"Hello DHAT profiling!");
     jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-    jws.set_key(&key);
-    let compact = jws.compact_serialization().unwrap();
+    let compact = jws.compact_serialization(&key).unwrap();
 
     // --- verify ---
     let constraints =
         AlgorithmConstraints::new(ConstraintType::Permit, [AlgorithmIdentifier::HmacSha256]);
     let mut verifier = JsonWebSignature::from_compact_serialization(&compact).unwrap();
     verifier.set_algorithm_constraints(&constraints);
-    verifier.set_key(&key);
-    assert!(verifier.verify_signature().unwrap());
-    let payload = verifier.payload().unwrap();
+    assert!(verifier.verify_signature(&key).unwrap());
+    let payload = verifier.payload(&key).unwrap();
     assert_eq!(payload, b"Hello DHAT profiling!");
 
     let stats = dhat::HeapStats::get();
@@ -113,9 +111,8 @@ fn profile_jws_ed25519_verify() {
 
     let mut jws = JsonWebSignature::from_compact_serialization(compact).unwrap();
     jws.set_algorithm_constraints(&constraints);
-    jws.set_key(&key);
-    assert!(jws.verify_signature().unwrap());
-    let _ = jws.payload().unwrap();
+    assert!(jws.verify_signature(&key).unwrap());
+    let _ = jws.payload(&key).unwrap();
 
     let stats = dhat::HeapStats::get();
     print_stats("JWS Ed25519 verify", &stats);
@@ -151,9 +148,8 @@ fn profile_jws_rs256_verify() {
 
     let mut jws = JsonWebSignature::from_compact_serialization(compact).unwrap();
     jws.set_algorithm_constraints(&constraints);
-    jws.set_key(&key);
-    assert!(jws.verify_signature().unwrap());
-    let _ = jws.payload().unwrap();
+    assert!(jws.verify_signature(&key).unwrap());
+    let _ = jws.payload(&key).unwrap();
 
     let stats = dhat::HeapStats::get();
     print_stats("JWS RS256 verify", &stats);
@@ -172,8 +168,7 @@ fn profile_jwe_direct_aes128gcm_decrypt() {
 
     let key = JsonWebKey::from_json(key_json).unwrap();
     let mut jwe = JsonWebEncryption::from_compact_serialization(compact).unwrap();
-    jwe.set_key(&key);
-    let payload = jwe.payload().unwrap();
+    let payload = jwe.payload(&key).unwrap();
     assert_eq!(payload, b"Hello world!");
 
     let stats = dhat::HeapStats::get();
@@ -193,8 +188,7 @@ fn profile_jwe_a128kw_aes128gcm_decrypt() {
 
     let key = JsonWebKey::from_json(key_json).unwrap();
     let mut jwe = JsonWebEncryption::from_compact_serialization(compact).unwrap();
-    jwe.set_key(&key);
-    let payload = jwe.payload().unwrap();
+    let payload = jwe.payload(&key).unwrap();
     assert_eq!(payload, b"Hello world!");
 
     let stats = dhat::HeapStats::get();
@@ -410,17 +404,15 @@ fn profile_jwt_full_round_trip() {
     let mut jws = JsonWebSignature::new();
     jws.set_payload(claims.to_json());
     jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-    jws.set_key(&key);
-    let jwt = jws.compact_serialization().unwrap();
+    let jwt = jws.compact_serialization(&key).unwrap();
 
     // Verify signature.
     let constraints =
         AlgorithmConstraints::new(ConstraintType::Permit, [AlgorithmIdentifier::HmacSha256]);
     let mut verifier = JsonWebSignature::from_compact_serialization(&jwt).unwrap();
     verifier.set_algorithm_constraints(&constraints);
-    verifier.set_key(&key);
-    assert!(verifier.verify_signature().unwrap());
-    let verified_json = String::from_utf8(verifier.payload().unwrap().to_vec()).unwrap();
+    assert!(verifier.verify_signature(&key).unwrap());
+    let verified_json = String::from_utf8(verifier.payload(&key).unwrap().to_vec()).unwrap();
 
     // Validate claims.
     let consumer = JwtConsumerBuilder::new()
@@ -477,25 +469,24 @@ fn audit_jws_parse_steps() {
 
     // 2. JWS parse
     let s2 = dhat::HeapStats::get();
-    let mut jws = JsonWebSignature::from_compact_serialization(compact).unwrap();
+    let jws = JsonWebSignature::from_compact_serialization(compact).unwrap();
     let s3 = dhat::HeapStats::get();
     print_delta("from_compact_serialization", &s2, &s3);
 
-    // 3. set_key (should be zero)
+    // 3. (set_key removed; key is a per-call arg now)
     let s4 = dhat::HeapStats::get();
-    jws.set_key(&key);
     let s5 = dhat::HeapStats::get();
-    print_delta("set_key", &s4, &s5);
+    print_delta("verify_signature-prep", &s4, &s5);
 
     // 4. verify_signature
     let s6 = dhat::HeapStats::get();
-    assert!(jws.verify_signature().unwrap());
+    assert!(jws.verify_signature(&key).unwrap());
     let s7 = dhat::HeapStats::get();
     print_delta("verify_signature", &s6, &s7);
 
     // 5. payload (re-verifies, then returns slice)
     let s8 = dhat::HeapStats::get();
-    let _ = jws.payload().unwrap();
+    let _ = jws.payload(&key).unwrap();
     let s9 = dhat::HeapStats::get();
     print_delta("payload()", &s8, &s9);
 
@@ -528,13 +519,12 @@ fn audit_jws_sign_steps() {
     let mut jws = JsonWebSignature::new();
     jws.set_payload(b"Hello DHAT profiling!");
     jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-    jws.set_key(&key);
     let s3 = dhat::HeapStats::get();
     print_delta("new + set_payload + set_algorithm", &s2, &s3);
 
     // 3. compact_serialization (sign + encode)
     let s4 = dhat::HeapStats::get();
-    let _compact = jws.compact_serialization().unwrap();
+    let _compact = jws.compact_serialization(&key).unwrap();
     let s5 = dhat::HeapStats::get();
     print_delta("compact_serialization()", &s4, &s5);
 
@@ -569,15 +559,14 @@ fn audit_jwe_parse_decrypt_steps() {
     let s3 = dhat::HeapStats::get();
     print_delta("from_compact_serialization", &s2, &s3);
 
-    // 3. set_key
+    // 3. (set_key removed; key is a per-call arg now)
     let s4 = dhat::HeapStats::get();
-    jwe.set_key(&key);
     let s5 = dhat::HeapStats::get();
-    print_delta("set_key", &s4, &s5);
+    print_delta("decrypt-prep", &s4, &s5);
 
     // 4. decrypt (payload)
     let s6 = dhat::HeapStats::get();
-    let payload = jwe.payload().unwrap();
+    let payload = jwe.payload(&key).unwrap();
     let s7 = dhat::HeapStats::get();
     print_delta("payload() [decrypt]", &s6, &s7);
 
@@ -611,10 +600,8 @@ fn audit_jwe_keywrap_parse_decrypt_steps() {
     let s3 = dhat::HeapStats::get();
     print_delta("from_compact_serialization", &s2, &s3);
 
-    jwe.set_key(&key);
-
     let s4 = dhat::HeapStats::get();
-    let payload = jwe.payload().unwrap();
+    let payload = jwe.payload(&key).unwrap();
     let s5 = dhat::HeapStats::get();
     print_delta("payload() [decrypt]", &s4, &s5);
 
@@ -648,13 +635,12 @@ fn audit_jwe_encrypt_serialize_steps() {
     jwe.set_payload("Hello world!");
     jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
     jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
-    jwe.set_key(&key);
     let s3 = dhat::HeapStats::get();
-    print_delta("new + set headers + set_key", &s2, &s3);
+    print_delta("new + set headers", &s2, &s3);
 
     // Encrypt
     let s4 = dhat::HeapStats::get();
-    jwe.encrypt().unwrap();
+    jwe.encrypt(&key).unwrap();
     let s5 = dhat::HeapStats::get();
     print_delta("encrypt()", &s4, &s5);
 

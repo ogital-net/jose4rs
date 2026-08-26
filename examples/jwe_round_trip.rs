@@ -37,11 +37,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ContentEncryptionAlgorithm::Aes128CbcHmacSha256.name(),
     );
 
-    // Set the key on the JWE. In this case, using direct mode, the key will be
-    // used directly as the content encryption key. AES_128_CBC_HMAC_SHA_256,
-    // which is being used to encrypt the content, requires a 256 bit key.
-    sender_jwe.set_key(&jwk);
-
     // Produce the JWE compact serialization, which is where the actual
     // encryption is done. The JWE compact serialization consists of five
     // base64url encoded parts combined with a dot ('.') character in the
@@ -49,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // <header>.<encrypted key>.<initialization vector>.<ciphertext>.<authentication tag>
     // Direct encryption doesn't use an encrypted key so that field will be an
     // empty string in this case.
-    sender_jwe.encrypt()?;
+    sender_jwe.encrypt(&jwk)?;
     let compact_serialization = sender_jwe.compact_serialization()?;
 
     // Do something with the JWE. Like send it to some other party over the
@@ -72,11 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Symmetric encryption, like we are doing here, requires that both parties
     // have the same key. The key will have had to have been securely exchanged
     // out-of-band somehow.
-    receiver_jwe.set_key(&jwk);
 
     // Get the message that was encrypted in the JWE. This step performs the
     // actual decryption steps.
-    let plaintext = String::from_utf8_lossy(receiver_jwe.payload()?);
+    let plaintext = String::from_utf8_lossy(receiver_jwe.payload(&jwk)?);
 
     // And do whatever you need to do with the clear text message.
     println!("plaintext: {plaintext}");

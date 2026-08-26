@@ -20,8 +20,7 @@ fn bench_jws_build_with_headers(c: &mut Criterion) {
             jws.set_header_name("kid", "key-1");
             jws.set_header_name("url", "https://acme.example.com/acct/1");
             jws.set_header_name("nonce", "abc123");
-            jws.set_key(&key);
-            black_box(jws.compact_serialization().unwrap());
+            black_box(jws.compact_serialization(&key).unwrap());
         });
     });
 }
@@ -37,10 +36,9 @@ fn bench_jws_b64_detached(c: &mut Criterion) {
             jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
             jws.set_header_name("url", "https://acme.example.com/new-acct");
             jws.set_header_name("nonce", "abc123");
-            jws.set_key(&key);
             jws.set_b64(false);
             jws.set_detached_payload(payload);
-            black_box(jws.flattened_json_serialization().unwrap());
+            black_box(jws.flattened_json_serialization(&key).unwrap());
         });
     });
 }

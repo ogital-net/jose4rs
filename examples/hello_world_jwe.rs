@@ -20,8 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         HeaderParameter::EncryptionMethod,
         ContentEncryptionAlgorithm::Aes128CbcHmacSha256.name(),
     );
-    jwe.set_key(&key);
-    jwe.encrypt()?;
+    jwe.encrypt(&key)?;
     let serialized_jwe = jwe.compact_serialization()?;
     println!("Serialized Encrypted JWE: {serialized_jwe}");
 
@@ -31,8 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut jwe = JsonWebEncryption::new();
     jwe.set_algorithm_constraints(&alg_constraints);
     jwe.set_compact_serialization(&serialized_jwe)?;
-    jwe.set_key(&key);
-    println!("Payload: {}", String::from_utf8_lossy(jwe.payload()?));
+    println!("Payload: {}", String::from_utf8_lossy(jwe.payload(&key)?));
 
     Ok(())
 }

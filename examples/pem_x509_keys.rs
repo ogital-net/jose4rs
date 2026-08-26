@@ -46,8 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut jws = JsonWebSignature::new();
     jws.set_payload("Payload verified with a key from a PEM round trip.");
     jws.set_algorithm(AlgorithmIdentifier::RsaUsingSha256);
-    jws.set_key(&signing_jwk);
-    let compact = jws.compact_serialization()?;
+    let compact = jws.compact_serialization(&signing_jwk)?;
     println!("JWS: {compact}");
 
     // Export the public key as a PEM (SubjectPublicKeyInfo). This is what a
@@ -66,9 +65,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     verifier.set_algorithm_constraints(&constraints);
     verifier.set_compact_serialization(&compact)?;
     let verification_jwk = JsonWebKey::Rsa(verification_jwk);
-    verifier.set_key(&verification_jwk);
 
-    let verified = verifier.verify_signature()?;
+    let verified = verifier.verify_signature(&verification_jwk)?;
     println!("JWS signature valid (key from PEM): {verified}");
     assert!(verified);
 

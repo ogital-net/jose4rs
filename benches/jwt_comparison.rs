@@ -121,19 +121,16 @@ fn bench_hs256_jwt(c: &mut Criterion) {
         let mut jws = JsonWebSignature::new();
         jws.set_payload(CLAIMS_JSON);
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
-        jws.set_key(&jose4rs_key);
-        jws.compact_serialization().unwrap()
+        jws.compact_serialization(&jose4rs_key).unwrap()
     };
 
     let mut group = c.benchmark_group("hs256_jwt_consume");
 
     group.bench_function("jose4rs", |b| {
         use jose4rs::jws::JsonWebSignature;
-        use jose4rs::jwx::JsonWebStructure;
         b.iter(|| {
-            let mut jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
-            jws.set_key(&jose4rs_key);
-            let payload = jws.payload().unwrap();
+            let jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
+            let payload = jws.payload(&jose4rs_key).unwrap();
             let payload = std::str::from_utf8(payload).unwrap();
             black_box(jose4rs_consumer.process_to_claims(payload).unwrap());
         });
@@ -181,7 +178,6 @@ fn bench_hs256_jwt(c: &mut Criterion) {
 fn bench_rs256_jwt(c: &mut Criterion) {
     use jose4rs::jwk::{JsonWebKeyGenerator, OutputControlLevel};
     use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
-    use jose4rs::jwx::JsonWebStructure;
 
     // Generate one RSA 2048-bit key pair, export in multiple formats.
     let jose4rs_key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::RsaUsingSha256)
@@ -219,20 +215,19 @@ fn bench_rs256_jwt(c: &mut Criterion) {
 
     // Sign one token with jose4rs -- all libraries verify the same bytes.
     let token = {
+        use jose4rs::jwx::JsonWebStructure;
         let mut jws = JsonWebSignature::new();
         jws.set_payload(CLAIMS_JSON);
         jws.set_algorithm(AlgorithmIdentifier::RsaUsingSha256);
-        jws.set_key(&jose4rs_key);
-        jws.compact_serialization().unwrap()
+        jws.compact_serialization(&jose4rs_key).unwrap()
     };
 
     let mut group = c.benchmark_group("rs256_jwt_consume");
 
     group.bench_function("jose4rs", |b| {
         b.iter(|| {
-            let mut jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
-            jws.set_key(&jose4rs_key);
-            let payload = jws.payload().unwrap();
+            let jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
+            let payload = jws.payload(&jose4rs_key).unwrap();
             let payload = std::str::from_utf8(payload).unwrap();
             black_box(jose4rs_consumer.process_to_claims(payload).unwrap());
         });
@@ -280,7 +275,6 @@ fn bench_rs256_jwt(c: &mut Criterion) {
 fn bench_es256_jwt(c: &mut Criterion) {
     use jose4rs::jwk::{JsonWebKeyGenerator, OutputControlLevel};
     use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
-    use jose4rs::jwx::JsonWebStructure;
 
     let jose4rs_key =
         JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
@@ -323,20 +317,19 @@ fn bench_es256_jwt(c: &mut Criterion) {
 
     // Sign one token with jose4rs -- all libraries verify the same bytes.
     let token = {
+        use jose4rs::jwx::JsonWebStructure;
         let mut jws = JsonWebSignature::new();
         jws.set_payload(CLAIMS_JSON);
         jws.set_algorithm(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256);
-        jws.set_key(&jose4rs_key);
-        jws.compact_serialization().unwrap()
+        jws.compact_serialization(&jose4rs_key).unwrap()
     };
 
     let mut group = c.benchmark_group("es256_jwt_consume");
 
     group.bench_function("jose4rs", |b| {
         b.iter(|| {
-            let mut jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
-            jws.set_key(&jose4rs_key);
-            let payload = jws.payload().unwrap();
+            let jws = JsonWebSignature::from_compact_serialization(&token).unwrap();
+            let payload = jws.payload(&jose4rs_key).unwrap();
             let payload = std::str::from_utf8(payload).unwrap();
             black_box(jose4rs_consumer.process_to_claims(payload).unwrap());
         });

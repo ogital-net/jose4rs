@@ -29,8 +29,7 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
         jwe.set_payload(PLAINTEXT);
         jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
         jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
-        jwe.set_key(&jose4rs_key);
-        jwe.encrypt().unwrap();
+        jwe.encrypt(&jose4rs_key).unwrap();
         jwe.compact_serialization().unwrap()
     };
     let josekit_token =
@@ -46,8 +45,7 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
                 jwe.set_payload(PLAINTEXT);
                 jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
                 jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
-                jwe.set_key(&jose4rs_key);
-                jwe.encrypt().unwrap();
+                jwe.encrypt(&jose4rs_key).unwrap();
                 black_box(jwe.compact_serialization().unwrap());
             });
         });
@@ -72,8 +70,7 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
             b.iter(|| {
                 let mut jwe =
                     JsonWebEncryption::from_compact_serialization(&jose4rs_token).unwrap();
-                jwe.set_key(&jose4rs_key);
-                black_box(jwe.payload().unwrap());
+                black_box(jwe.payload(&jose4rs_key).unwrap());
             });
         });
 
@@ -121,8 +118,7 @@ fn bench_jwe_rsa_oaep(c: &mut Criterion) {
         jwe.set_payload(PLAINTEXT);
         jwe.set_algorithm(KeyManagementAlgorithm::RsaOaep);
         jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
-        jwe.set_key(&jose4rs_key);
-        jwe.encrypt().unwrap();
+        jwe.encrypt(&jose4rs_key).unwrap();
         jwe.compact_serialization().unwrap()
     };
     let josekit_token =
@@ -138,8 +134,7 @@ fn bench_jwe_rsa_oaep(c: &mut Criterion) {
                 jwe.set_payload(PLAINTEXT);
                 jwe.set_algorithm(KeyManagementAlgorithm::RsaOaep);
                 jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
-                jwe.set_key(&jose4rs_key);
-                jwe.encrypt().unwrap();
+                jwe.encrypt(&jose4rs_key).unwrap();
                 black_box(jwe.compact_serialization().unwrap());
             });
         });
@@ -164,8 +159,7 @@ fn bench_jwe_rsa_oaep(c: &mut Criterion) {
             b.iter(|| {
                 let mut jwe =
                     JsonWebEncryption::from_compact_serialization(&jose4rs_token).unwrap();
-                jwe.set_key(&jose4rs_key);
-                black_box(jwe.payload().unwrap());
+                black_box(jwe.payload(&jose4rs_key).unwrap());
             });
         });
 
