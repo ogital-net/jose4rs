@@ -2,16 +2,16 @@ use std::{ffi::CStr, fmt, mem, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word, BN_dup,
-    BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes, OPENSSL_free,
-    BIGNUM,
+    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word,
+    BN_dup, BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
+    OPENSSL_free,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word, BN_dup,
-    BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes, OPENSSL_free,
-    BIGNUM,
+    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word,
+    BN_dup, BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
+    OPENSSL_free,
 };
 
 use crate::{base64, crypto::mem::new_boxed_slice, error::JoseError};

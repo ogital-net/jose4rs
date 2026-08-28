@@ -103,19 +103,27 @@ mod tests {
             ],
         );
 
-        assert!(constraints
-            .check_constraint(AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384)
-            .is_err());
-        assert!(constraints
-            .check_constraint(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
-            .is_ok());
-        assert!(constraints
-            .check_constraint(AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512)
-            .is_ok());
+        assert!(
+            constraints
+                .check_constraint(AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384)
+                .is_err()
+        );
+        assert!(
+            constraints
+                .check_constraint(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
+                .is_ok()
+        );
+        assert!(
+            constraints
+                .check_constraint(AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512)
+                .is_ok()
+        );
 
         let constraints = &BLOCK_NONE;
-        assert!(constraints
-            .check_constraint(AlgorithmIdentifier::None)
-            .is_err());
+        assert!(
+            constraints
+                .check_constraint(AlgorithmIdentifier::None)
+                .is_err()
+        );
     }
 }

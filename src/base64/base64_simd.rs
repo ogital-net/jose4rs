@@ -1,4 +1,4 @@
-use crate::{base64::Error, BufferRef};
+use crate::{BufferRef, base64::Error};
 
 impl From<base64_simd::Error> for Error {
     fn from(_value: base64_simd::Error) -> Self {

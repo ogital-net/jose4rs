@@ -254,12 +254,14 @@ mod tests {
         );
 
         // Combined criteria.
-        assert!(set
-            .find_key(Some("the key"), Some("EC"), Some(KeyUse::Signature), None)
-            .is_some());
-        assert!(set
-            .find_key(Some("the key"), Some("RSA"), None, None)
-            .is_none());
+        assert!(
+            set.find_key(Some("the key"), Some("EC"), Some(KeyUse::Signature), None)
+                .is_some()
+        );
+        assert!(
+            set.find_key(Some("the key"), Some("RSA"), None, None)
+                .is_none()
+        );
     }
 
     #[test]
@@ -292,11 +294,15 @@ mod tests {
         let json = set.to_json(super::super::OutputControlLevel::PublicOnly);
         let reparsed = JsonWebKeySet::from_json(&json).unwrap();
         assert_eq!(reparsed.len(), 2);
-        assert!(reparsed
-            .find_key(Some("the key"), None, None, None)
-            .is_some());
-        assert!(reparsed
-            .find_key(Some("other key"), None, None, None)
-            .is_some());
+        assert!(
+            reparsed
+                .find_key(Some("the key"), None, None, None)
+                .is_some()
+        );
+        assert!(
+            reparsed
+                .find_key(Some("other key"), None, None, None)
+                .is_some()
+        );
     }
 }

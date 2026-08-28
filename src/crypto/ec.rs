@@ -2,27 +2,27 @@ use std::{mem, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    ECDSA_SIG_free, ECDSA_SIG_get0_r, ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0,
-    ECDSA_do_sign, ECDSA_do_verify, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group,
-    EC_KEY_get0_private_key, EC_KEY_get0_public_key, EC_KEY_new_by_curve_name,
-    EC_KEY_set_private_key, EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT_free,
-    EC_POINT_get_affine_coordinates, EC_POINT_new, EC_POINT_set_affine_coordinates,
-    NID_X9_62_prime256v1, NID_secp256k1, NID_secp384r1, NID_secp521r1, EC_GROUP, EC_KEY, EC_POINT,
+    EC_GROUP, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group, EC_KEY_get0_private_key,
+    EC_KEY_get0_public_key, EC_KEY_new_by_curve_name, EC_KEY_set_private_key,
+    EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT, EC_POINT_free, EC_POINT_get_affine_coordinates,
+    EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free, ECDSA_SIG_get0_r,
+    ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign, ECDSA_do_verify,
+    NID_X9_62_prime256v1, NID_secp256k1, NID_secp384r1, NID_secp521r1,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    ECDSA_SIG_free, ECDSA_SIG_get0_r, ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0,
-    ECDSA_do_sign, ECDSA_do_verify, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group,
-    EC_KEY_get0_private_key, EC_KEY_get0_public_key, EC_KEY_new_by_curve_name,
-    EC_KEY_set_private_key, EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT_free,
-    EC_POINT_get_affine_coordinates, EC_POINT_new, EC_POINT_set_affine_coordinates,
-    NID_X9_62_prime256v1, NID_secp384r1, NID_secp521r1, EC_GROUP, EC_KEY, EC_POINT,
+    EC_GROUP, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group, EC_KEY_get0_private_key,
+    EC_KEY_get0_public_key, EC_KEY_new_by_curve_name, EC_KEY_set_private_key,
+    EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT, EC_POINT_free, EC_POINT_get_affine_coordinates,
+    EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free, ECDSA_SIG_get0_r,
+    ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign, ECDSA_do_verify,
+    NID_X9_62_prime256v1, NID_secp384r1, NID_secp521r1,
 };
 
 use crate::error::JoseError;
 
-use super::{digest, BigNum};
+use super::{BigNum, digest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Curve {

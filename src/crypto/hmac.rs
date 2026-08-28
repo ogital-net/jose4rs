@@ -1,10 +1,10 @@
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    HMAC_CTX_free, HMAC_CTX_new, HMAC_Final, HMAC_Init_ex, HMAC_Update, HMAC, HMAC_CTX,
+    HMAC, HMAC_CTX, HMAC_CTX_free, HMAC_CTX_new, HMAC_Final, HMAC_Init_ex, HMAC_Update,
 };
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    HMAC_CTX_free, HMAC_CTX_new, HMAC_Final, HMAC_Init_ex, HMAC_Update, HMAC, HMAC_CTX,
+    HMAC, HMAC_CTX, HMAC_CTX_free, HMAC_CTX_new, HMAC_Final, HMAC_Init_ex, HMAC_Update,
 };
 
 use crate::error::JoseError;

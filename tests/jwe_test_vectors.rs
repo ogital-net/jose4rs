@@ -85,7 +85,7 @@ fn read_labeled_value<'a>(lines: &mut std::str::Lines<'a>, label: &str) -> &'a s
             .next()
             .unwrap_or_else(|| panic!("expected value after {label}"));
     }
-    
+
     value.trim()
 }
 

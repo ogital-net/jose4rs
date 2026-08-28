@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use jose4rs::jwk::JsonWebKey;
 use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
 use jose4rs::jwx::JsonWebStructure;

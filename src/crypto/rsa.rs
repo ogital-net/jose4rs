@@ -2,15 +2,15 @@ use std::mem;
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    RSA_free, RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n,
-    RSA_get0_p, RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key,
-    RSA_up_ref, BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING,
+    BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING, RSA_free,
+    RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n, RSA_get0_p,
+    RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key, RSA_up_ref,
 };
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    RSA_free, RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n,
-    RSA_get0_p, RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key,
-    RSA_up_ref, BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING,
+    BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING, RSA_free,
+    RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n, RSA_get0_p,
+    RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key, RSA_up_ref,
 };
 
 use crate::error::JoseError;

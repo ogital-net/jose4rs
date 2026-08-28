@@ -1,8 +1,8 @@
-use crate::crypto::hmac;
-use crate::crypto::mem::crypto_memcmp;
 use crate::crypto::CipherAlgorithm;
 use crate::crypto::DigestAlgorithm;
 use crate::crypto::EvpCipherCtx;
+use crate::crypto::hmac;
+use crate::crypto::mem::crypto_memcmp;
 use crate::error::JoseError;
 
 pub(super) struct AesHmacAeadCtx {

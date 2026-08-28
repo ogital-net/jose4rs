@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use serde::{Deserialize, Serialize};
 use std::hint::black_box;
 use std::time::Duration;
@@ -154,8 +154,8 @@ fn bench_hs256_jwt(c: &mut Criterion) {
     });
 
     group.bench_function("biscuit", |b| {
-        use biscuit::jwa::SignatureAlgorithm;
         use biscuit::Empty;
+        use biscuit::jwa::SignatureAlgorithm;
         b.iter(|| {
             let decoded = biscuit::JWT::<Empty, Empty>::new_encoded(&token)
                 .into_decoded(&biscuit_secret, SignatureAlgorithm::HS256)
@@ -251,8 +251,8 @@ fn bench_rs256_jwt(c: &mut Criterion) {
     });
 
     group.bench_function("biscuit", |b| {
-        use biscuit::jwa::SignatureAlgorithm;
         use biscuit::Empty;
+        use biscuit::jwa::SignatureAlgorithm;
         b.iter(|| {
             let decoded = biscuit::JWT::<Empty, Empty>::new_encoded(&token)
                 .into_decoded(&biscuit_verify_secret, SignatureAlgorithm::RS256)
@@ -353,8 +353,8 @@ fn bench_es256_jwt(c: &mut Criterion) {
     });
 
     group.bench_function("biscuit", |b| {
-        use biscuit::jwa::SignatureAlgorithm;
         use biscuit::Empty;
+        use biscuit::jwa::SignatureAlgorithm;
         b.iter(|| {
             let decoded = biscuit::JWT::<Empty, Empty>::new_encoded(&token)
                 .into_decoded(&biscuit_verify_secret, SignatureAlgorithm::ES256)

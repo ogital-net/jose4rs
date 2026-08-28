@@ -2,9 +2,9 @@ use std::fmt;
 
 use crate::{
     base64,
-    crypto::{aead, aes, mem, pbkdf2, rand::rand_bytes, DigestAlgorithm},
+    crypto::{DigestAlgorithm, aead, aes, mem, pbkdf2, rand::rand_bytes},
     error::JoseError,
-    jwe::{kdf, ContentEncryptionAlgorithm, ContentEncryptionKeys},
+    jwe::{ContentEncryptionAlgorithm, ContentEncryptionKeys, kdf},
     jwk::JsonWebKey,
     jwx::HeaderParameter,
 };
@@ -673,7 +673,7 @@ impl KeyManagementAlgorithm {
             Some(_) => {
                 return Err(JoseError::InvalidAlgorithm(
                     "PBES2 iteration count out of acceptable range".to_string(),
-                ))
+                ));
             }
             None => {
                 set_header_u64(

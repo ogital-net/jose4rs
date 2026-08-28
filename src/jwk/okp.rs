@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{curve25519::ed25519_pubkey_is_valid_for_private_key, EvpPkey, EvpPkeyType, X509Cert},
+    crypto::{EvpPkey, EvpPkeyType, X509Cert, curve25519::ed25519_pubkey_is_valid_for_private_key},
     error::JoseError,
     jws::AlgorithmIdentifier,
 };

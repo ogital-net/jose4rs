@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use simd_json::{
+    ValueBuilder as _,
     base::{ValueAsArray, ValueAsScalar, Writable},
     derived::{
         MutableObject, TypedObjectValue, ValueObjectAccessAsArray, ValueObjectAccessAsScalar,
     },
     prelude::ValueObjectAccess,
-    ValueBuilder as _,
 };
 
 use crate::error::JoseError;

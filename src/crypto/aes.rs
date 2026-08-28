@@ -1,9 +1,9 @@
 use std::mem::MaybeUninit;
 
 #[cfg(feature = "aws-lc")]
-use aws_lc_sys::{AES_set_decrypt_key, AES_set_encrypt_key, AES_unwrap_key, AES_wrap_key, AES_KEY};
+use aws_lc_sys::{AES_KEY, AES_set_decrypt_key, AES_set_encrypt_key, AES_unwrap_key, AES_wrap_key};
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
-use boring_sys::{AES_set_decrypt_key, AES_set_encrypt_key, AES_unwrap_key, AES_wrap_key, AES_KEY};
+use boring_sys::{AES_KEY, AES_set_decrypt_key, AES_set_encrypt_key, AES_unwrap_key, AES_wrap_key};
 
 use crate::{crypto::mem, error::JoseError};
 

@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use super::https::{
-    FetchResponse, DEFAULT_CACHE_DURATION, KID_MISS_REFRESH_COOLDOWN, REFRESH_REPRIEVE_THRESHOLD,
+    DEFAULT_CACHE_DURATION, FetchResponse, KID_MISS_REFRESH_COOLDOWN, REFRESH_REPRIEVE_THRESHOLD,
 };
 use super::{JsonWebKey, JsonWebKeySet};
 use crate::error::JoseError;

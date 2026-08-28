@@ -2,38 +2,38 @@ use std::{mem::ManuallyDrop, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    d2i_AutoPrivateKey, d2i_PUBKEY, EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign,
-    EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY_CTX_free,
+    EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign, EVP_DigestSignInit,
+    EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
     EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
     EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits,
-    EVP_PKEY_cmp, EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
-    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
-    EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_get_raw_private_key,
-    EVP_PKEY_get_raw_public_key, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
-    EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
-    EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
-    PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_DH,
-    EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA,
-    EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
+    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
+    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
+    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
+    EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_id,
+    EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new, EVP_PKEY_new_raw_private_key,
+    EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen, EVP_PKEY_paramgen_init, EVP_PKEY_up_ref,
+    EVP_marshal_private_key, EVP_marshal_public_key, PEM_write_bio_PKCS8PrivateKey,
+    PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    d2i_AutoPrivateKey, d2i_PUBKEY, EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign,
-    EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY_CTX_free,
+    EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign, EVP_DigestSignInit,
+    EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
     EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
     EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits,
-    EVP_PKEY_cmp, EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
-    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
-    EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_get_raw_private_key,
-    EVP_PKEY_get_raw_public_key, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
-    EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
-    EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
-    PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_DH,
-    EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA,
-    EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
+    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
+    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
+    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
+    EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_id,
+    EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new, EVP_PKEY_new_raw_private_key,
+    EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen, EVP_PKEY_paramgen_init, EVP_PKEY_up_ref,
+    EVP_marshal_private_key, EVP_marshal_public_key, PEM_write_bio_PKCS8PrivateKey,
+    PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
 };
 
 use crate::{
@@ -42,11 +42,11 @@ use crate::{
 };
 
 use super::{
+    Bio,
     bytestring::Cbb,
     curve25519::{ed25519_keypair, x25519_keypair},
     ec::{Curve, EcKey},
     rsa::Rsa,
-    Bio,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -845,15 +845,17 @@ mod tests {
         let eddsa = EvpPkey::generate_ed25519();
 
         for key in [rsa, ec, eddsa] {
-            assert!(key
-                .private_key_to_pem()
-                .unwrap()
-                .starts_with("-----BEGIN PRIVATE KEY-----"));
+            assert!(
+                key.private_key_to_pem()
+                    .unwrap()
+                    .starts_with("-----BEGIN PRIVATE KEY-----")
+            );
             print!("{}", key.private_key_to_pem().unwrap());
-            assert!(key
-                .public_key_to_pem()
-                .unwrap()
-                .starts_with("-----BEGIN PUBLIC KEY-----"));
+            assert!(
+                key.public_key_to_pem()
+                    .unwrap()
+                    .starts_with("-----BEGIN PUBLIC KEY-----")
+            );
         }
     }
 

@@ -10,20 +10,19 @@ mod algorithm_identifier;
 
 pub use algorithm_identifier::AlgorithmIdentifier;
 use simd_json::{
+    ValueBuilder,
     base::{ValueAsArray as _, ValueAsScalar as _},
     derived::{MutableObject, TypedObjectValue as _, ValueObjectAccessAsScalar as _},
     prelude::{ValueObjectAccess, Writable as _},
-    ValueBuilder,
 };
 
 use crate::{
-    base64,
+    BufferRef, base64,
     crypto::DigestAlgorithm,
     error::JoseError,
     jwa::{AlgorithmConstraints, BLOCK_NONE},
     jwk::JsonWebKey,
     jwx::{HeaderParameter, JsonWebStructure},
-    BufferRef,
 };
 
 const MIN_RSA_KEY_BITS: usize = 2048;
@@ -469,7 +468,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::HmacSha384 => match key {
@@ -478,7 +477,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::HmacSha512 => match key {
@@ -487,7 +486,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaUsingSha256 => match key {
@@ -496,7 +495,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaUsingSha384 => match key {
@@ -505,7 +504,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaUsingSha512 => match key {
@@ -514,7 +513,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256 => match key {
@@ -525,7 +524,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384 => match key {
@@ -536,7 +535,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512 => match key {
@@ -547,7 +546,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             #[cfg(not(feature = "boring"))]
@@ -559,7 +558,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::EdDsa => match key {
@@ -568,7 +567,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaPssUsingSha256 => match key {
@@ -579,7 +578,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaPssUsingSha384 => match key {
@@ -590,7 +589,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             AlgorithmIdentifier::RsaPssUsingSha512 => match key {
@@ -601,7 +600,7 @@ impl<'a> JsonWebSignature<'a> {
                     return Err(JoseError::InvalidKey(format!(
                         "invalid key type {}",
                         key.key_type()
-                    )))
+                    )));
                 }
             },
             _ => unreachable!("unsupported algorithm"),

@@ -2,16 +2,16 @@ use std::mem::MaybeUninit;
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    EVP_DigestFinal_ex, EVP_DigestInit_ex, EVP_DigestUpdate, EVP_MD_CTX_cleanup, EVP_MD_CTX_copy,
-    EVP_MD_CTX_init, EVP_MD_CTX_md, EVP_MD_CTX_size, EVP_sha1, EVP_sha256, EVP_sha384, EVP_sha512,
-    EVP_MD, EVP_MD_CTX, SHA1, SHA256, SHA384, SHA512,
+    EVP_DigestFinal_ex, EVP_DigestInit_ex, EVP_DigestUpdate, EVP_MD, EVP_MD_CTX,
+    EVP_MD_CTX_cleanup, EVP_MD_CTX_copy, EVP_MD_CTX_init, EVP_MD_CTX_md, EVP_MD_CTX_size, EVP_sha1,
+    EVP_sha256, EVP_sha384, EVP_sha512, SHA1, SHA256, SHA384, SHA512,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    EVP_DigestFinal_ex, EVP_DigestInit_ex, EVP_DigestUpdate, EVP_MD_CTX_cleanup, EVP_MD_CTX_copy,
-    EVP_MD_CTX_init, EVP_MD_CTX_md, EVP_MD_CTX_size, EVP_sha1, EVP_sha256, EVP_sha384, EVP_sha512,
-    EVP_MD, EVP_MD_CTX, SHA1, SHA256, SHA384, SHA512,
+    EVP_DigestFinal_ex, EVP_DigestInit_ex, EVP_DigestUpdate, EVP_MD, EVP_MD_CTX,
+    EVP_MD_CTX_cleanup, EVP_MD_CTX_copy, EVP_MD_CTX_init, EVP_MD_CTX_md, EVP_MD_CTX_size, EVP_sha1,
+    EVP_sha256, EVP_sha384, EVP_sha512, SHA1, SHA256, SHA384, SHA512,
 };
 
 use crate::crypto::mem;

@@ -11,8 +11,8 @@
 //! selects among several certificates by x5t/x5t#S256 thumbprint.)
 
 use jose4rs::jwa::{AlgorithmConstraints, ConstraintType};
-use jose4rs::jwk::rsa::RsaJsonWebKey;
 use jose4rs::jwk::JsonWebKeyGenerator;
+use jose4rs::jwk::rsa::RsaJsonWebKey;
 use jose4rs::jwk::{JsonWebKey, OutputControlLevel};
 use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
 use jose4rs::jwx::JsonWebStructure;

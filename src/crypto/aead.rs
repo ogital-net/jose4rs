@@ -2,15 +2,15 @@ use std::{mem::MaybeUninit, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    EVP_AEAD_CTX_cleanup, EVP_AEAD_CTX_init, EVP_AEAD_CTX_open_gather, EVP_AEAD_CTX_seal_scatter,
-    EVP_aead_aes_128_gcm, EVP_aead_aes_192_gcm, EVP_aead_aes_256_gcm, EVP_aead_chacha20_poly1305,
-    EVP_aead_xchacha20_poly1305, EVP_AEAD, EVP_AEAD_CTX,
+    EVP_AEAD, EVP_AEAD_CTX, EVP_AEAD_CTX_cleanup, EVP_AEAD_CTX_init, EVP_AEAD_CTX_open_gather,
+    EVP_AEAD_CTX_seal_scatter, EVP_aead_aes_128_gcm, EVP_aead_aes_192_gcm, EVP_aead_aes_256_gcm,
+    EVP_aead_chacha20_poly1305, EVP_aead_xchacha20_poly1305,
 };
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    EVP_AEAD_CTX_cleanup, EVP_AEAD_CTX_init, EVP_AEAD_CTX_open_gather, EVP_AEAD_CTX_seal_scatter,
-    EVP_aead_aes_128_gcm, EVP_aead_aes_192_gcm, EVP_aead_aes_256_gcm, EVP_aead_chacha20_poly1305,
-    EVP_aead_xchacha20_poly1305, EVP_AEAD, EVP_AEAD_CTX,
+    EVP_AEAD, EVP_AEAD_CTX, EVP_AEAD_CTX_cleanup, EVP_AEAD_CTX_init, EVP_AEAD_CTX_open_gather,
+    EVP_AEAD_CTX_seal_scatter, EVP_aead_aes_128_gcm, EVP_aead_aes_192_gcm, EVP_aead_aes_256_gcm,
+    EVP_aead_chacha20_poly1305, EVP_aead_xchacha20_poly1305,
 };
 
 use crate::error::JoseError;

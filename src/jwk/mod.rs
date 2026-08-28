@@ -7,7 +7,7 @@ use rsa::RsaJsonWebKey;
 use simd_json::derived::ValueObjectAccessAsScalar as _;
 
 use crate::{
-    crypto::{rand::rand_bytes, Bio, EcCurve, EvpPkey, EvpPkeyType},
+    crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, rand::rand_bytes},
     error::JoseError,
     jwe::KeyManagementAlgorithm,
     jws::AlgorithmIdentifier,
@@ -30,7 +30,7 @@ mod set;
 
 #[cfg(feature = "jwks-https")]
 pub use https::{
-    FetchResponse, HttpsJwks, JwksFetcher, DEFAULT_CACHE_DURATION, KID_MISS_REFRESH_COOLDOWN,
+    DEFAULT_CACHE_DURATION, FetchResponse, HttpsJwks, JwksFetcher, KID_MISS_REFRESH_COOLDOWN,
     REFRESH_REPRIEVE_THRESHOLD,
 };
 #[cfg(feature = "jwks-https-async")]
@@ -165,7 +165,7 @@ impl JsonWebKey {
                 _ => {
                     return Err(JoseError::InvalidJson(
                         "'kty' must be one of 'EC', RSA', 'OKP', or 'oct'".into(),
-                    ))
+                    ));
                 }
             },
             None => return Err(JoseError::InvalidJson("'kty' field missing".into())),
@@ -184,7 +184,7 @@ impl JsonWebKey {
                 _ => {
                     return Err(JoseError::InvalidJson(
                         "'kty' must be one of 'EC', RSA', 'OKP', or 'oct'".into(),
-                    ))
+                    ));
                 }
             },
             None => return Err(JoseError::InvalidJson("'kty' field missing".into())),
@@ -1011,9 +1011,11 @@ mod tests {
         let parsed_pub = JsonWebKey::from_pem(&pub_pem).unwrap();
         assert_eq!(parsed_pub.key_type(), "RSA");
         // A public-only parse must not offer a private PEM.
-        assert!(parsed_pub
-            .to_pem(OutputControlLevel::IncludePrivate)
-            .is_err());
+        assert!(
+            parsed_pub
+                .to_pem(OutputControlLevel::IncludePrivate)
+                .is_err()
+        );
 
         // EC
         let ec =
@@ -1041,9 +1043,11 @@ mod tests {
         let pub_pem = x.to_pem(OutputControlLevel::PublicOnly).unwrap();
         let parsed = JsonWebKey::from_pem(&pub_pem).unwrap();
         assert_eq!(parsed.key_type(), "OKP");
-        assert!(parsed
-            .to_json(OutputControlLevel::PublicOnly)
-            .contains("X25519"));
+        assert!(
+            parsed
+                .to_json(OutputControlLevel::PublicOnly)
+                .contains("X25519")
+        );
 
         // oct keys have no PEM representation.
         let oct = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A128Kw)
@@ -1190,9 +1194,11 @@ mod tests {
             .unwrap();
         assert_eq!(generated.x5t(), None);
         assert_eq!(generated.x5t_s256(), None);
-        assert!(!generated
-            .to_json(OutputControlLevel::PublicOnly)
-            .contains("x5t"));
+        assert!(
+            !generated
+                .to_json(OutputControlLevel::PublicOnly)
+                .contains("x5t")
+        );
 
         // Symmetric keys never have thumbprints.
         let oct = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A128Kw)

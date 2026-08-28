@@ -1,10 +1,10 @@
 use std::{mem::MaybeUninit, ptr};
 
 #[cfg(feature = "aws-lc")]
-use aws_lc_sys::{CBB_cleanup, CBB_finish, CBB_init, OPENSSL_free, CBB};
+use aws_lc_sys::{CBB, CBB_cleanup, CBB_finish, CBB_init, OPENSSL_free};
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
-use boring_sys::{CBB_cleanup, CBB_finish, CBB_init, OPENSSL_free, CBB};
+use boring_sys::{CBB, CBB_cleanup, CBB_finish, CBB_init, OPENSSL_free};
 
 pub(super) struct Cbb(CBB);
 

@@ -10,18 +10,17 @@ use std::sync::LazyLock;
 pub use content_enc_alg::ContentEncryptionAlgorithm;
 pub use key_mgmt_alg::KeyManagementAlgorithm;
 use simd_json::{
+    ValueBuilder,
     derived::{MutableObject, TypedObjectValue as _, ValueObjectAccessAsScalar as _},
     prelude::Writable as _,
-    ValueBuilder,
 };
 
 use crate::{
-    base64,
+    BufferRef, base64,
     error::JoseError,
     jwa::{AlgorithmConstraints, ConstraintType},
     jwk::JsonWebKey,
     jwx::{HeaderParameter, JsonWebStructure},
-    BufferRef,
 };
 
 static DEFAULT_BLOCK: LazyLock<AlgorithmConstraints<KeyManagementAlgorithm>> =

@@ -373,8 +373,9 @@ mod tests {
         assert_eq!(found.key_type(), "OKP");
 
         // With epk kty = EC, the OKP key does not match.
-        assert!(sel
-            .select_list(Some("x"), "ECDH-ES", Some("EC"), keys)
-            .is_empty());
+        assert!(
+            sel.select_list(Some("x"), "ECDH-ES", Some("EC"), keys)
+                .is_empty()
+        );
     }
 }

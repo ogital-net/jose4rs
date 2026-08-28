@@ -1,10 +1,10 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 
 /// Test-only standard (padded) base64 engine, used only by the test helpers.
 #[cfg(test)]
 use base64::engine::general_purpose::STANDARD;
 
-use crate::{base64::Error, BufferRef};
+use crate::{BufferRef, base64::Error};
 
 impl From<base64::DecodeError> for Error {
     fn from(_value: base64::DecodeError) -> Self {

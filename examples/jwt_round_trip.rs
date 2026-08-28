@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     claims.set_not_before(SystemTime::now() - Duration::from_secs(2 * 60)); // 2 minutes ago
     claims.set_subject("subject"); // the subject/principal is whom the token is about
     claims.set_string_claim("email", "mail@example.com")?; // custom claims can be added
-                                                           // Multi-valued claims work too and will end up as a JSON array.
+    // Multi-valued claims work too and will end up as a JSON array.
     claims.set_string_array_claim("groups", &["group-one", "other-group", "group-three"])?;
 
     // A JWT is a JWS and/or a JWE with JSON claims as the payload.

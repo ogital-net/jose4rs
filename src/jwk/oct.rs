@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{hmac, mem::crypto_memcmp, DigestAlgorithm},
+    crypto::{DigestAlgorithm, hmac, mem::crypto_memcmp},
     error::JoseError,
     jws::AlgorithmIdentifier,
 };

@@ -1,6 +1,6 @@
 use crate::{
     base64,
-    crypto::{mem, DigestAlgorithm, MessageDigest},
+    crypto::{DigestAlgorithm, MessageDigest, mem},
     error::JoseError,
 };
 

@@ -300,9 +300,11 @@ mod jwt_consumer_tests {
         assert!(err.has_error_code(ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE));
 
         // consistent exp >= iat and nbf passes
-        assert!(consumer
-            .process_to_claims(r#"{"nbf":1430601000,"iat":1430601000,"exp":1430602000}"#)
-            .is_ok());
+        assert!(
+            consumer
+                .process_to_claims(r#"{"nbf":1430601000,"iat":1430601000,"exp":1430602000}"#)
+                .is_ok()
+        );
     }
 
     /// Test issued at (iat) reasonableness checks

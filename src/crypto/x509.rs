@@ -1,12 +1,12 @@
 use std::ptr;
 
 #[cfg(feature = "aws-lc")]
-use aws_lc_sys::{d2i_X509, i2d_X509, PEM_read_bio_X509, X509_free, X509_get_pubkey, X509};
+use aws_lc_sys::{PEM_read_bio_X509, X509, X509_free, X509_get_pubkey, d2i_X509, i2d_X509};
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
-use boring_sys::{d2i_X509, i2d_X509, PEM_read_bio_X509, X509_free, X509_get_pubkey, X509};
+use boring_sys::{PEM_read_bio_X509, X509, X509_free, X509_get_pubkey, d2i_X509, i2d_X509};
 
-use super::{digest, Bio, EvpPkey};
+use super::{Bio, EvpPkey, digest};
 use crate::{base64, error::JoseError};
 
 /// A wrapper around an X.509 certificate (`X509`).

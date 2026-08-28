@@ -2,16 +2,16 @@ use std::{mem::MaybeUninit, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    EVP_CIPHER_CTX_cleanup, EVP_CIPHER_CTX_init, EVP_DecryptFinal_ex, EVP_DecryptInit_ex,
-    EVP_DecryptUpdate, EVP_EncryptFinal_ex, EVP_EncryptInit_ex, EVP_EncryptUpdate, EVP_aes_128_cbc,
-    EVP_aes_192_cbc, EVP_aes_256_cbc, EVP_CIPHER, EVP_CIPHER_CTX,
+    EVP_CIPHER, EVP_CIPHER_CTX, EVP_CIPHER_CTX_cleanup, EVP_CIPHER_CTX_init, EVP_DecryptFinal_ex,
+    EVP_DecryptInit_ex, EVP_DecryptUpdate, EVP_EncryptFinal_ex, EVP_EncryptInit_ex,
+    EVP_EncryptUpdate, EVP_aes_128_cbc, EVP_aes_192_cbc, EVP_aes_256_cbc,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    EVP_CIPHER_CTX_cleanup, EVP_CIPHER_CTX_init, EVP_DecryptFinal_ex, EVP_DecryptInit_ex,
-    EVP_DecryptUpdate, EVP_EncryptFinal_ex, EVP_EncryptInit_ex, EVP_EncryptUpdate, EVP_aes_128_cbc,
-    EVP_aes_192_cbc, EVP_aes_256_cbc, EVP_CIPHER, EVP_CIPHER_CTX,
+    EVP_CIPHER, EVP_CIPHER_CTX, EVP_CIPHER_CTX_cleanup, EVP_CIPHER_CTX_init, EVP_DecryptFinal_ex,
+    EVP_DecryptInit_ex, EVP_DecryptUpdate, EVP_EncryptFinal_ex, EVP_EncryptInit_ex,
+    EVP_EncryptUpdate, EVP_aes_128_cbc, EVP_aes_192_cbc, EVP_aes_256_cbc,
 };
 
 use crate::error::JoseError;
