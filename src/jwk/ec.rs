@@ -257,15 +257,19 @@ impl EcJsonWebKey {
             out.push('"');
         }
         out.push_str(",\"x\":\"");
-        out.push_str(unsafe { std::str::from_utf8_unchecked(&x.to_b64_padded(coordinate_len)) });
+        // SAFETY: base64url output is pure ASCII, always valid UTF-8.
+        // Bind to a local so the temporary lives for the duration of push_str
+        // (edition 2024 enforces this for `&` of owned temporaries).
+        let x_b64 = x.to_b64_padded(coordinate_len);
+        out.push_str(unsafe { std::str::from_utf8_unchecked(&x_b64) });
         out.push_str("\",\"y\":\"");
-        out.push_str(unsafe { std::str::from_utf8_unchecked(&y.to_b64_padded(coordinate_len)) });
+        let y_b64 = y.to_b64_padded(coordinate_len);
+        out.push_str(unsafe { std::str::from_utf8_unchecked(&y_b64) });
         out.push('"');
         if let Some(d) = d {
             out.push_str(",\"d\":\"");
-            out.push_str(unsafe {
-                std::str::from_utf8_unchecked(&d.to_b64_padded(coordinate_len))
-            });
+            let d_b64 = d.to_b64_padded(coordinate_len);
+            out.push_str(unsafe { std::str::from_utf8_unchecked(&d_b64) });
             out.push('"');
         }
         out.push('}');

@@ -85,8 +85,8 @@ fn read_labeled_value<'a>(lines: &mut std::str::Lines<'a>, label: &str) -> &'a s
             .next()
             .unwrap_or_else(|| panic!("expected value after {label}"));
     }
-    let value = value.trim();
-    value
+    
+    value.trim()
 }
 
 /// The vector file's `alg` strings use the RFC 7518 spellings, which differ

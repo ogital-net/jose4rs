@@ -275,12 +275,18 @@ impl RsaJsonWebKey {
         }
         if let Some(n) = &n {
             out.push_str(",\"n\":\"");
-            out.push_str(unsafe { std::str::from_utf8_unchecked(&n.to_b64()) });
+            // SAFETY: base64url output is pure ASCII, always valid UTF-8.
+            // Bind to a local so the temporary lives for the duration of
+            // push_str (edition 2024 enforces this for `&` of owned
+            // temporaries).
+            let n_b64 = n.to_b64();
+            out.push_str(unsafe { std::str::from_utf8_unchecked(&n_b64) });
             out.push('"');
         }
         if let Some(e) = &e {
             out.push_str(",\"e\":\"");
-            out.push_str(unsafe { std::str::from_utf8_unchecked(&e.to_b64()) });
+            let e_b64 = e.to_b64();
+            out.push_str(unsafe { std::str::from_utf8_unchecked(&e_b64) });
             out.push('"');
         }
         for (param, name) in &private_params {
@@ -288,7 +294,8 @@ impl RsaJsonWebKey {
                 out.push_str(",\"");
                 out.push_str(name);
                 out.push_str("\":\"");
-                out.push_str(unsafe { std::str::from_utf8_unchecked(&v.to_b64()) });
+                let v_b64 = v.to_b64();
+                out.push_str(unsafe { std::str::from_utf8_unchecked(&v_b64) });
                 out.push('"');
             }
         }

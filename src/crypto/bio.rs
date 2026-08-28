@@ -28,9 +28,11 @@ impl Bio {
     /// # Safety
     /// The slice must outlive the returned `Bio` (the BIO references it without copying).
     pub(crate) unsafe fn from_slice(slice: &[u8]) -> Self {
-        let ptr = BIO_new_mem_buf(slice.as_ptr() as *const _, slice.len() as isize);
+        // Edition 2024: unsafe operations inside an `unsafe fn` body must be
+        // wrapped in an explicit `unsafe { ... }` block.
+        let ptr = unsafe { BIO_new_mem_buf(slice.as_ptr() as *const _, slice.len() as isize) };
         assert!(!ptr.is_null(), "BIO_new_mem_buf() failed");
-        Self(ptr::NonNull::new_unchecked(ptr))
+        Self(unsafe { ptr::NonNull::new_unchecked(ptr) })
     }
 
     pub(crate) fn as_ptr(&self) -> *const BIO {

@@ -254,12 +254,18 @@ impl OkpJsonWebKey {
         }
         if let Some(x) = x {
             out.push_str(",\"x\":\"");
-            out.push_str(unsafe { std::str::from_utf8_unchecked(&base64::url_encode(&x)) });
+            // SAFETY: base64url output is pure ASCII, always valid UTF-8.
+            // Bind to a local so the temporary lives for the duration of
+            // push_str (edition 2024 enforces this for `&` of owned
+            // temporaries).
+            let x_b64 = base64::url_encode(&x);
+            out.push_str(unsafe { std::str::from_utf8_unchecked(&x_b64) });
             out.push('"');
         }
         if let Some(d) = d {
             out.push_str(",\"d\":\"");
-            out.push_str(unsafe { std::str::from_utf8_unchecked(&base64::url_encode(&d)) });
+            let d_b64 = base64::url_encode(&d);
+            out.push_str(unsafe { std::str::from_utf8_unchecked(&d_b64) });
             out.push('"');
         }
         out.push('}');

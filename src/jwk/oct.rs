@@ -107,10 +107,12 @@ impl OctetSequenceJsonWebKey {
         match level {
             OutputControlLevel::IncludePrivate | OutputControlLevel::IncludeSymmetric => {
                 out.push_str(",\"k\":\"");
-                // SAFETY: base64url output is pure ASCII, always valid UTF-8
-                out.push_str(unsafe {
-                    std::str::from_utf8_unchecked(&base64::url_encode(&self.oct_key))
-                });
+                // SAFETY: base64url output is pure ASCII, always valid UTF-8.
+                // Bind to a local so the temporary lives for the duration of
+                // push_str (edition 2024 enforces this for `&` of owned
+                // temporaries).
+                let k_b64 = base64::url_encode(&self.oct_key);
+                out.push_str(unsafe { std::str::from_utf8_unchecked(&k_b64) });
                 out.push('"');
             }
             OutputControlLevel::PublicOnly => {}
