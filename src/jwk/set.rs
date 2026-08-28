@@ -149,25 +149,25 @@ impl JsonWebKeySet {
         key_use: Option<KeyUse>,
         algorithm: Option<&str>,
     ) -> bool {
-        if let Some(want) = key_id {
-            if key.key_id() != Some(want) {
-                return false;
-            }
+        if let Some(want) = key_id
+            && key.key_id() != Some(want)
+        {
+            return false;
         }
-        if let Some(want) = key_type {
-            if key.key_type() != want {
-                return false;
-            }
+        if let Some(want) = key_type
+            && key.key_type() != want
+        {
+            return false;
         }
-        if let Some(want) = key_use {
-            if key.key_use() != Some(want) {
-                return false;
-            }
+        if let Some(want) = key_use
+            && key.key_use() != Some(want)
+        {
+            return false;
         }
-        if let Some(want) = algorithm {
-            if key.algorithm() != Some(want) {
-                return false;
-            }
+        if let Some(want) = algorithm
+            && key.algorithm() != Some(want)
+        {
+            return false;
         }
         true
     }

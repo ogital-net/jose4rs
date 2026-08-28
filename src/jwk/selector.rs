@@ -83,12 +83,11 @@ impl VerificationJwkSelector {
         // the wrong curve is unusable regardless of how many candidates there
         // are -- drop it always, not just when ambiguous. EdDSA admits both
         // Ed25519 and Ed448, so OKP keys are not narrowed by curve here.
-        if let Some(alg_id) = alg_id {
-            if alg_id.key_type() == Some("EC") {
-                if let Some(crv) = alg_id.ec_curve() {
-                    candidates.retain(|k| k.curve_name() == Some(crv));
-                }
-            }
+        if let Some(alg_id) = alg_id
+            && alg_id.key_type() == Some("EC")
+            && let Some(crv) = alg_id.ec_curve()
+        {
+            candidates.retain(|k| k.curve_name() == Some(crv));
         }
 
         candidates
@@ -111,18 +110,17 @@ impl VerificationJwkSelector {
         want_use: KeyUse,
     ) -> bool {
         // kty is always required, derived from the algorithm's key type.
-        if let Some(alg) = alg {
-            if let Some(kty) = alg.key_type() {
-                if key.key_type() != kty {
-                    return false;
-                }
-            }
+        if let Some(alg) = alg
+            && let Some(kty) = alg.key_type()
+            && key.key_type() != kty
+        {
+            return false;
         }
         // kid: required (exact) only when the JWS carries one.
-        if let Some(kid) = key_id {
-            if !Presence::Required.meets(kid, key.key_id()) {
-                return false;
-            }
+        if let Some(kid) = key_id
+            && !Presence::Required.meets(kid, key.key_id())
+        {
+            return false;
         }
         // use: match-if-present on the JWK.
         if !Presence::OmittedOkay.meets(want_use.as_str(), key.key_use().map(|u| u.as_str())) {
@@ -172,16 +170,16 @@ impl DecryptionJwkSelector {
         keys.iter()
             .filter(|k| {
                 // kty required.
-                if let Some(kty) = want_kty {
-                    if k.key_type() != kty {
-                        return false;
-                    }
+                if let Some(kty) = want_kty
+                    && k.key_type() != kty
+                {
+                    return false;
                 }
                 // kid required only when the JWE carries one.
-                if let Some(kid) = key_id {
-                    if !Presence::Required.meets(kid, k.key_id()) {
-                        return false;
-                    }
+                if let Some(kid) = key_id
+                    && !Presence::Required.meets(kid, k.key_id())
+                {
+                    return false;
                 }
                 // use=enc is match-if-present.
                 if !Presence::OmittedOkay

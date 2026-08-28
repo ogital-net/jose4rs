@@ -1075,12 +1075,12 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
     // RFC 7517 Section 4.4: a key with an `alg` member is intended only
     // for that algorithm. Reject same-family algorithm drift (e.g.
     // a key tagged HS256 verifying HS384).
-    if let Some(key_alg) = key.algorithm() {
-        if key_alg != alg.name() {
-            return Err(JoseError::InvalidKey(format!(
-                "key is restricted to algorithm '{key_alg}' but the JWS uses '{alg}'"
-            )));
-        }
+    if let Some(key_alg) = key.algorithm()
+        && key_alg != alg.name()
+    {
+        return Err(JoseError::InvalidKey(format!(
+            "key is restricted to algorithm '{key_alg}' but the JWS uses '{alg}'"
+        )));
     }
     match key {
         JsonWebKey::Rsa(rsa_key) => {
@@ -1118,13 +1118,13 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
             // specific curve. Reject a key whose curve doesn't match
             // (e.g. a P-384 key used with ES256), as jose4j's
             // EcdsaUsingShaAlgorithm.validateKeySpec() does.
-            if let Some(required_curve) = alg.ec_curve() {
-                if ec_key.curve_name() != required_curve {
-                    return Err(JoseError::InvalidKey(format!(
-                        "key curve '{}' does not match the curve '{required_curve}' required by {alg}",
-                        ec_key.curve_name()
-                    )));
-                }
+            if let Some(required_curve) = alg.ec_curve()
+                && ec_key.curve_name() != required_curve
+            {
+                return Err(JoseError::InvalidKey(format!(
+                    "key curve '{}' does not match the curve '{required_curve}' required by {alg}",
+                    ec_key.curve_name()
+                )));
             }
             Ok(())
         }

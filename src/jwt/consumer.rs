@@ -728,10 +728,10 @@ impl JwtConsumer {
             }
 
             // Validate audience
-            if !self.skip_default_audience_validation {
-                if let Err(e) = self.validate_audience(&claims) {
-                    errors.extend(e.error_codes);
-                }
+            if !self.skip_default_audience_validation
+                && let Err(e) = self.validate_audience(&claims)
+            {
+                errors.extend(e.error_codes);
             }
 
             // Validate subject
@@ -780,13 +780,14 @@ impl JwtConsumer {
         // A present-but-non-string iss is malformed, not missing; reject it
         // (before the missing check, which would otherwise mask it) when the
         // caller has configured expected issuers.
-        if let Some(expected_issuers) = &self.expected_issuers {
-            if !expected_issuers.is_empty() && claims.string_claim_is_malformed("iss") {
-                return Err(InvalidJwtError::with_error_code(
-                    "issuer claim is malformed (must be a string)",
-                    ErrorCode::ISSUER_INVALID,
-                ));
-            }
+        if let Some(expected_issuers) = &self.expected_issuers
+            && !expected_issuers.is_empty()
+            && claims.string_claim_is_malformed("iss")
+        {
+            return Err(InvalidJwtError::with_error_code(
+                "issuer claim is malformed (must be a string)",
+                ErrorCode::ISSUER_INVALID,
+            ));
         }
 
         if self.require_issuer && issuer.is_none() {
@@ -972,17 +973,17 @@ impl JwtConsumer {
             }
 
             // exp cannot precede iat (inconsistent claims)
-            if let TimeClaim::Value(iat_secs) = iat {
-                if exp_secs < iat_secs {
-                    errors.push(ErrorCode::EXPIRATION_BEFORE_ISSUED_AT);
-                }
+            if let TimeClaim::Value(iat_secs) = iat
+                && exp_secs < iat_secs
+            {
+                errors.push(ErrorCode::EXPIRATION_BEFORE_ISSUED_AT);
             }
 
             // exp cannot precede nbf (inconsistent claims)
-            if let TimeClaim::Value(nbf_secs) = nbf {
-                if exp_secs < nbf_secs {
-                    errors.push(ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE);
-                }
+            if let TimeClaim::Value(nbf_secs) = nbf
+                && exp_secs < nbf_secs
+            {
+                errors.push(ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE);
             }
 
             // Check if expiration is too far in the future
