@@ -302,19 +302,17 @@ impl AsyncHttpsJwks {
     }
 
     fn cache_life(&self, response: &FetchResponse) -> Duration {
-        if let Some(cc) = &response.cache_control {
-            if let Some(secs) = super::https::parse_max_age(cc) {
-                if secs > 0 {
-                    return Duration::from_secs(secs);
-                }
-            }
+        if let Some(cc) = &response.cache_control
+            && let Some(secs) = super::https::parse_max_age(cc)
+            && secs > 0
+        {
+            return Duration::from_secs(secs);
         }
-        if let Some(expires) = &response.expires {
-            if let Some(secs) = super::https::parse_http_date_remaining(expires) {
-                if secs > 0 {
-                    return Duration::from_secs(secs);
-                }
-            }
+        if let Some(expires) = &response.expires
+            && let Some(secs) = super::https::parse_http_date_remaining(expires)
+            && secs > 0
+        {
+            return Duration::from_secs(secs);
         }
         self.state.default_cache_duration
     }

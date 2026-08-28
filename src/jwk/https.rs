@@ -363,19 +363,17 @@ impl HttpsJwks {
     /// `Cache-Control: max-age` wins over `Expires`; both absent (or
     /// non-positive) falls back to the default duration.
     fn cache_life(&self, response: &FetchResponse) -> Duration {
-        if let Some(cc) = &response.cache_control {
-            if let Some(secs) = parse_max_age(cc) {
-                if secs > 0 {
-                    return Duration::from_secs(secs);
-                }
-            }
+        if let Some(cc) = &response.cache_control
+            && let Some(secs) = parse_max_age(cc)
+            && secs > 0
+        {
+            return Duration::from_secs(secs);
         }
-        if let Some(expires) = &response.expires {
-            if let Some(secs) = parse_http_date_remaining(expires) {
-                if secs > 0 {
-                    return Duration::from_secs(secs);
-                }
-            }
+        if let Some(expires) = &response.expires
+            && let Some(secs) = parse_http_date_remaining(expires)
+            && secs > 0
+        {
+            return Duration::from_secs(secs);
         }
         self.state.default_cache_duration
     }
