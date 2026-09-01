@@ -9,6 +9,20 @@ use crate::{crypto::mem, error::JoseError};
 
 struct AesKey(AES_KEY);
 
+impl Drop for AesKey {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is valid for exactly `size_of::<AES_KEY>()` writable
+        // bytes, and cleanse does not retain the slice.
+        let bytes = unsafe {
+            std::slice::from_raw_parts_mut(
+                std::ptr::from_mut(&mut self.0).cast(),
+                std::mem::size_of::<AES_KEY>(),
+            )
+        };
+        mem::cleanse(bytes);
+    }
+}
+
 impl AesKey {
     fn as_ptr(&self) -> *const AES_KEY {
         &self.0
@@ -86,14 +100,14 @@ pub(crate) fn unwrap_key(
     aes_key: &[u8],
     iv: Option<&[u8]>,
     src: &[u8],
-) -> Result<Box<[u8]>, JoseError> {
+) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
     // RFC 3394: the wrapped key is at least one 8-byte block plus the 8-byte
     // integrity check value, and must be a multiple of 8 bytes. Validate the
     // length before allocating to avoid an underflow on `src.len() - 8`.
     if src.len() < 16 || !src.len().is_multiple_of(8) {
         return Err(JoseError::InvalidKey("invalid wrapped key length".into()));
     }
-    let mut out = mem::new_boxed_slice(src.len() - 8);
+    let mut out = mem::Zeroizing::new(mem::new_boxed_slice(src.len() - 8));
     let written = unwrap_key_buf(aes_key, iv, src, &mut out)?;
     debug_assert_eq!(written, out.len());
     Ok(out)

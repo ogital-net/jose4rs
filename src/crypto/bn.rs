@@ -2,19 +2,23 @@ use std::{ffi::CStr, fmt, mem, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word,
-    BN_dup, BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
+    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_clear_free, BN_cmp,
+    BN_cmp_word, BN_dup, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
     OPENSSL_free,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_cmp, BN_cmp_word,
-    BN_dup, BN_free, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
+    BIGNUM, BN_bin2bn, BN_bn2bin, BN_bn2bin_padded, BN_bn2dec, BN_bn2hex, BN_clear_free, BN_cmp,
+    BN_cmp_word, BN_dup, BN_is_odd, BN_is_word, BN_is_zero, BN_new, BN_num_bits, BN_num_bytes,
     OPENSSL_free,
 };
 
-use crate::{base64, crypto::mem::new_boxed_slice, error::JoseError};
+use crate::{
+    base64,
+    crypto::mem::{Zeroizing, new_boxed_slice},
+    error::JoseError,
+};
 
 pub(crate) struct BigNum(ptr::NonNull<BIGNUM>);
 
@@ -34,7 +38,7 @@ impl BigNum {
     }
 
     pub(crate) fn from_b64<T: AsRef<[u8]>>(b64: T) -> Result<Self, JoseError> {
-        let bytes = base64::url_decode(b64)?;
+        let bytes = Zeroizing::new(base64::url_decode(b64)?);
         Ok(bytes.as_ref().into())
     }
 
@@ -42,7 +46,7 @@ impl BigNum {
     /// octets to `len` bytes, as required for JWK EC coordinates.
     pub(crate) fn to_b64_padded(&self, len: usize) -> Box<[u8]> {
         let ptr = self.as_ptr();
-        let mut buffer = new_boxed_slice(len);
+        let mut buffer = Zeroizing::new(new_boxed_slice(len));
         assert!(
             1 == unsafe { BN_bn2bin_padded(buffer.as_mut_ptr(), len, ptr) },
             "BN_bn2bin_padded() failed"
@@ -62,7 +66,7 @@ impl BigNum {
     /// allocation, without creating an owning `BigNum` or intermediate buffer.
     pub(crate) fn ptr_to_b64(ptr: *const BIGNUM) -> Box<[u8]> {
         assert!(!ptr.is_null());
-        let bytes = Self::bn_to_be_bytes(ptr);
+        let bytes = Zeroizing::new(Self::bn_to_be_bytes(ptr));
         base64::url_encode(&bytes)
     }
 
@@ -219,7 +223,7 @@ impl PartialOrd<u32> for BigNum {
 impl Drop for BigNum {
     #[inline]
     fn drop(&mut self) {
-        unsafe { BN_free(self.as_mut_ptr()) };
+        unsafe { BN_clear_free(self.as_mut_ptr()) };
     }
 }
 
@@ -295,7 +299,7 @@ mod tests {
             ptr
         };
         unsafe {
-            BN_free(ptr); // Ensure the pointer is freed
+            BN_clear_free(ptr); // Ensure the pointer is cleansed and freed
         }
     }
 

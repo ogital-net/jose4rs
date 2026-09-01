@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{BigNum, DigestAlgorithm, EvpPkey, EvpPkeyType, Rsa, RsaPadding, RsaParam, X509Cert},
+    crypto::{
+        BigNum, DigestAlgorithm, EvpPkey, EvpPkeyType, Rsa, RsaPadding, RsaParam, X509Cert,
+        mem::Zeroizing,
+    },
     error::JoseError,
     jws::AlgorithmIdentifier,
 };
@@ -311,7 +314,7 @@ impl RsaJsonWebKey {
                 out.push_str(",\"");
                 out.push_str(name);
                 out.push_str("\":\"");
-                let v_b64 = v.to_b64();
+                let v_b64 = Zeroizing::new(v.to_b64());
                 out.push_str(unsafe { std::str::from_utf8_unchecked(&v_b64) });
                 out.push('"');
             }

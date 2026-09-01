@@ -2,18 +2,18 @@ use crate::crypto::CipherAlgorithm;
 use crate::crypto::DigestAlgorithm;
 use crate::crypto::EvpCipherCtx;
 use crate::crypto::hmac;
-use crate::crypto::mem::crypto_memcmp;
+use crate::crypto::mem::{Zeroizing, crypto_memcmp};
 use crate::error::JoseError;
 
 pub(super) struct AesHmacAeadCtx {
     algorithm: Algorithm,
-    key: Box<[u8]>,
+    key: Zeroizing<Box<[u8]>>,
     evp_cipher_ctx: EvpCipherCtx,
 }
 
 impl AesHmacAeadCtx {
     pub(super) fn init(algorithm: Algorithm, key: &[u8]) -> Self {
-        let key = Box::from(key);
+        let key = Zeroizing::new(Box::from(key));
         Self {
             algorithm,
             key,

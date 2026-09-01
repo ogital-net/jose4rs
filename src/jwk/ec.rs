@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{BigNum, DigestAlgorithm, EcCurve, EcKey, EvpPkey, EvpPkeyType, X509Cert},
+    crypto::{
+        BigNum, DigestAlgorithm, EcCurve, EcKey, EvpPkey, EvpPkeyType, X509Cert, mem::Zeroizing,
+    },
     error::JoseError,
     jws::AlgorithmIdentifier,
 };
@@ -284,7 +286,7 @@ impl EcJsonWebKey {
         out.push('"');
         if let Some(d) = d {
             out.push_str(",\"d\":\"");
-            let d_b64 = d.to_b64_padded(coordinate_len);
+            let d_b64 = Zeroizing::new(d.to_b64_padded(coordinate_len));
             out.push_str(unsafe { std::str::from_utf8_unchecked(&d_b64) });
             out.push('"');
         }

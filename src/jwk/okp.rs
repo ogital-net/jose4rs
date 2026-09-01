@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{EvpPkey, EvpPkeyType, X509Cert},
+    crypto::{EvpPkey, EvpPkeyType, X509Cert, mem::Zeroizing},
     error::JoseError,
     jws::AlgorithmIdentifier,
 };
@@ -59,7 +59,7 @@ impl OkpJsonWebKey {
     /// Returns an error if the key is not exactly 32 bytes or the crypto
     /// backend rejects it.
     pub fn from_public_bytes(curve: OkpCurve, key: impl AsRef<[u8]>) -> Result<Self, JoseError> {
-        Self::from_owned_bytes(curve, key.as_ref().into(), false)
+        Self::from_bytes(curve, key.as_ref(), false)
     }
 
     /// Builds an Ed25519 or X25519 JWK from raw private key bytes.
@@ -73,19 +73,12 @@ impl OkpJsonWebKey {
     /// Returns an error if the key is not exactly 32 bytes or the crypto
     /// backend rejects it.
     pub fn from_private_bytes(curve: OkpCurve, key: impl AsRef<[u8]>) -> Result<Self, JoseError> {
-        Self::from_owned_bytes(curve, key.as_ref().into(), true)
+        Self::from_bytes(curve, key.as_ref(), true)
     }
 
-    fn from_owned_bytes(
-        curve: OkpCurve,
-        mut key: Box<[u8]>,
-        private: bool,
-    ) -> Result<Self, JoseError> {
+    fn from_bytes(curve: OkpCurve, key: &[u8], private: bool) -> Result<Self, JoseError> {
         let key_len = key.len();
         if key_len != Self::RAW_KEY_LEN {
-            if private {
-                crate::crypto::mem::cleanse(&mut key);
-            }
             let visibility = if private { "private" } else { "public" };
             return Err(JoseError::InvalidKey(format!(
                 "invalid {visibility} key length for {}: expected {} bytes, got {}",
@@ -100,11 +93,16 @@ impl OkpJsonWebKey {
             OkpCurve::X25519 => EvpPkeyType::X25519,
         };
         let evp_pkey = if private {
-            EvpPkey::new_raw_private_key(key_type, &mut key)?
+            EvpPkey::new_raw_private_key(key_type, key)?
         } else {
-            EvpPkey::new_raw_public_key(key_type, &mut key)?
+            EvpPkey::new_raw_public_key(key_type, key)?
         };
         Ok(Self::new(evp_pkey, None))
+    }
+
+    fn from_owned_private_bytes(curve: OkpCurve, key: Box<[u8]>) -> Result<Self, JoseError> {
+        let key = Zeroizing::new(key);
+        Self::from_bytes(curve, &key, true)
     }
 
     pub(super) fn from_evp_pkey(evp_pkey: EvpPkey) -> Self {
@@ -309,7 +307,9 @@ impl OkpJsonWebKey {
 
         let x = self.evp_pkey.get_raw_public_key();
         let d = match level {
-            OutputControlLevel::IncludePrivate => self.evp_pkey.get_raw_private_key(),
+            OutputControlLevel::IncludePrivate => {
+                self.evp_pkey.get_raw_private_key().map(Zeroizing::new)
+            }
             OutputControlLevel::IncludeSymmetric | OutputControlLevel::PublicOnly => None,
         };
 
@@ -370,7 +370,7 @@ impl OkpJsonWebKey {
         }
         if let Some(d) = d {
             out.push_str(",\"d\":\"");
-            let d_b64 = base64::url_encode(&d);
+            let d_b64 = Zeroizing::new(base64::url_encode(&d));
             out.push_str(unsafe { std::str::from_utf8_unchecked(&d_b64) });
             out.push('"');
         }
@@ -426,7 +426,7 @@ impl OkpJsonWebKey {
         }?;
 
         let mut jwk = if let Some(private) = d {
-            let jwk = Self::from_owned_bytes(curve, private, true)?;
+            let jwk = Self::from_owned_private_bytes(curve, private)?;
             let derived_public = jwk.evp_pkey.get_raw_public_key().ok_or_else(|| {
                 JoseError::InvalidKey(format!("could not derive {} public key", curve.jose_name()))
             })?;
@@ -438,7 +438,7 @@ impl OkpJsonWebKey {
             }
             jwk
         } else {
-            Self::from_owned_bytes(curve, x, false)?
+            Self::from_bytes(curve, &x, false)?
         };
         jwk.alg = alg;
         jwk.x5t = value.get("x5t").map(str::to_string);

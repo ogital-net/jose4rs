@@ -120,27 +120,22 @@ impl EvpPkey {
 
     pub(crate) fn new_raw_private_key(
         key_type: EvpPkeyType,
-        key: &mut [u8],
+        key: &[u8],
     ) -> Result<Self, JoseError> {
         let ptr = unsafe {
             // the key is duplicated and ownership is not transferred
             EVP_PKEY_new_raw_private_key(key_type.into(), ptr::null_mut(), key.as_ptr(), key.len())
         };
-        mem::cleanse(key);
         let ptr = ptr::NonNull::new(ptr)
             .ok_or_else(|| JoseError::InvalidKey("invalid raw private key".into()))?;
         Ok(Self(ptr))
     }
 
-    pub(crate) fn new_raw_public_key(
-        key_type: EvpPkeyType,
-        key: &mut [u8],
-    ) -> Result<Self, JoseError> {
+    pub(crate) fn new_raw_public_key(key_type: EvpPkeyType, key: &[u8]) -> Result<Self, JoseError> {
         let ptr = unsafe {
             // the key is duplicated and ownership is not transferred
             EVP_PKEY_new_raw_public_key(key_type.into(), ptr::null_mut(), key.as_ptr(), key.len())
         };
-        mem::cleanse(key);
         let ptr = ptr::NonNull::new(ptr)
             .ok_or_else(|| JoseError::InvalidKey("invalid raw public key".into()))?;
         Ok(Self(ptr))
@@ -191,17 +186,17 @@ impl EvpPkey {
 
     pub(crate) fn generate_ed25519() -> Self {
         let mut out_public_key = [0u8; 32];
-        let mut out_private_key = [0u8; 64];
-        ed25519_keypair(&mut out_public_key, &mut out_private_key);
-        EvpPkey::new_raw_private_key(EvpPkeyType::Ed25519, &mut out_private_key[..32])
+        let mut out_private_key = mem::Zeroizing::new([0u8; 64]);
+        ed25519_keypair(&mut out_public_key, out_private_key.as_inner_mut());
+        EvpPkey::new_raw_private_key(EvpPkeyType::Ed25519, &out_private_key[..32])
             .expect("generated Ed25519 private key should be valid")
     }
 
     pub(crate) fn generate_x25519() -> Self {
         let mut out_public_value = [0u8; 32];
-        let mut out_private_key = [0u8; 32];
-        x25519_keypair(&mut out_public_value, &mut out_private_key);
-        EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &mut out_private_key)
+        let mut out_private_key = mem::Zeroizing::new([0u8; 32]);
+        x25519_keypair(&mut out_public_value, out_private_key.as_inner_mut());
+        EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &out_private_key)
             .expect("generated X25519 private key should be valid")
     }
 
@@ -392,7 +387,7 @@ impl EvpPkey {
         }
     }
 
-    pub(crate) fn derive(&self, peer: &EvpPkey) -> Result<Box<[u8]>, JoseError> {
+    pub(crate) fn derive(&self, peer: &EvpPkey) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
         // Only key-agreement-capable keys (ECDH: EC or X25519) can derive a
         // shared secret. A signing-only key such as Ed25519 cannot; reject it
         // here with a descriptive error instead of letting the key-agreement
@@ -422,15 +417,18 @@ impl EvpPkey {
                 return Err(JoseError::InvalidKey("key agreement (ECDH) failed".into()));
             }
         }
-        let mut out = Vec::with_capacity(len);
+        let mut out = mem::Zeroizing::new(vec![0; len].into_boxed_slice());
         unsafe {
             if 1 != EVP_PKEY_derive(pctx.as_mut_ptr(), out.as_mut_ptr(), &mut len) {
                 return Err(JoseError::InvalidKey("key agreement (ECDH) failed".into()));
             }
-            out.set_len(len);
         }
-        debug_assert_eq!(out.capacity(), len);
-        Ok(out.into_boxed_slice())
+        if out.len() != len {
+            return Err(JoseError::InvalidKey(
+                "key agreement (ECDH) returned an unexpected secret length".into(),
+            ));
+        }
+        Ok(out)
     }
 
     pub(crate) fn private_key_to_der(&self) -> Result<Box<[u8]>, JoseError> {

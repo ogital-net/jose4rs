@@ -21,7 +21,7 @@ impl ConcatKDF {
         algorithm_id: impl AsRef<[u8]>,
         party_u_info: &str,
         party_v_info: &str,
-    ) -> Result<Vec<u8>, JoseError> {
+    ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
         let algorithm_id = Self::prepend_len(algorithm_id);
         // RFC 7518 Section 4.6: apu/apv contribute the base64url-DECODED octets.
         let party_u_info = Self::prepend_len_base64(party_u_info)?;
@@ -46,14 +46,15 @@ impl ConcatKDF {
         party_u_info: &[u8],
         party_v_info: &[u8],
         supp_pub_info: &[u8],
-    ) -> Vec<u8> {
+    ) -> mem::Zeroizing<Box<[u8]>> {
         let hash_len_bytes = self.md_alg.output_len();
         let hash_len_bits = hash_len_bytes * 8;
+        let key_data_len_bytes = key_data_len_bits / 8;
 
         let reps = key_data_len_bits.div_ceil(hash_len_bits);
         let mut md = MessageDigest::init(self.md_alg);
 
-        let mut derived_key_material = Vec::with_capacity(reps * hash_len_bytes);
+        let mut derived_key_material = Vec::with_capacity(key_data_len_bytes);
         for i in 0..reps {
             md.update(((i + 1) as u32).to_be_bytes());
             md.update(shared_secret);
@@ -61,15 +62,11 @@ impl ConcatKDF {
             md.update(party_u_info);
             md.update(party_v_info);
             md.update(supp_pub_info);
-            let digest = md.finish();
-            derived_key_material.extend_from_slice(&digest);
+            let digest = mem::Zeroizing::new(md.finish());
+            let remaining = key_data_len_bytes - derived_key_material.len();
+            derived_key_material.extend_from_slice(&digest[..remaining.min(digest.len())]);
         }
-
-        let key_data_len_bytes = key_data_len_bits / 8;
-        if derived_key_material.len() > key_data_len_bytes {
-            derived_key_material.truncate(key_data_len_bytes);
-        }
-        derived_key_material
+        mem::Zeroizing::new(derived_key_material.into_boxed_slice())
     }
 
     fn prepend_len(src: impl AsRef<[u8]>) -> Box<[u8]> {

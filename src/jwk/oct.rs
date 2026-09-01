@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{DigestAlgorithm, hmac, mem::crypto_memcmp},
+    crypto::{
+        DigestAlgorithm, hmac,
+        mem::{Zeroizing, crypto_memcmp},
+    },
     error::JoseError,
     jws::AlgorithmIdentifier,
 };
@@ -13,7 +16,7 @@ use super::GetStr;
 /// A symmetric (shared-secret) JSON Web Key (`kty: "oct"`), used for HMAC
 /// signatures and symmetric JWE key management / direct encryption.
 pub struct OctetSequenceJsonWebKey {
-    oct_key: Box<[u8]>,
+    oct_key: Zeroizing<Box<[u8]>>,
     alg: Option<AlgorithmIdentifier>,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
@@ -35,7 +38,7 @@ impl std::fmt::Debug for OctetSequenceJsonWebKey {
 impl OctetSequenceJsonWebKey {
     pub(super) fn new(oct_key: Box<[u8]>, alg: Option<AlgorithmIdentifier>) -> Self {
         Self {
-            oct_key,
+            oct_key: Zeroizing::new(oct_key),
             alg,
             key_use: None,
             key_id: None,
@@ -118,7 +121,7 @@ impl OctetSequenceJsonWebKey {
                 // Bind to a local so the temporary lives for the duration of
                 // push_str (edition 2024 enforces this for `&` of owned
                 // temporaries).
-                let k_b64 = base64::url_encode(&self.oct_key);
+                let k_b64 = Zeroizing::new(base64::url_encode(&self.oct_key));
                 out.push_str(unsafe { std::str::from_utf8_unchecked(&k_b64) });
                 out.push('"');
             }

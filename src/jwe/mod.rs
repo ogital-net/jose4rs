@@ -17,6 +17,7 @@ use simd_json::{
 
 use crate::{
     BufferRef, base64,
+    crypto::mem::Zeroizing,
     error::JoseError,
     jwa::{AlgorithmConstraints, ConstraintType},
     jwk::JsonWebKey,
@@ -307,7 +308,7 @@ impl<'a> JsonWebEncryption<'a> {
         // Single CSPRNG call for both the random CEK and content IV.
         let cek_len = content_enc_alg.key_len();
         let iv_len = content_enc_alg.iv_len();
-        let mut rand_buf = [0u8; MAX_CEK_LEN + MAX_IV_LEN];
+        let mut rand_buf = Zeroizing::new([0u8; MAX_CEK_LEN + MAX_IV_LEN]);
         crate::crypto::rand::rand_bytes_buf(&mut rand_buf[..cek_len + iv_len]);
 
         // Key management: wrap the random CEK. This may also set header
@@ -683,7 +684,7 @@ impl<'a> JsonWebEncryption<'a> {
 }
 
 pub(super) struct ContentEncryptionKeys {
-    cek: [u8; MAX_CEK_LEN],
+    cek: Zeroizing<[u8; MAX_CEK_LEN]>,
     cek_len: usize,
     encrypted_key: Option<Box<[u8]>>,
 }
@@ -693,7 +694,7 @@ impl ContentEncryptionKeys {
         let mut buf = [0u8; MAX_CEK_LEN];
         buf[..cek.len()].copy_from_slice(cek);
         Self {
-            cek: buf,
+            cek: Zeroizing::new(buf),
             cek_len: cek.len(),
             encrypted_key: Some(encrypted_key.into()),
         }
@@ -703,7 +704,7 @@ impl ContentEncryptionKeys {
         let mut buf = [0u8; MAX_CEK_LEN];
         buf[..cek.len()].copy_from_slice(cek);
         Self {
-            cek: buf,
+            cek: Zeroizing::new(buf),
             cek_len: cek.len(),
             encrypted_key: None,
         }

@@ -5,7 +5,7 @@ use boring_sys::PKCS5_PBKDF2_HMAC;
 
 use crate::error::JoseError;
 
-use super::digest;
+use super::{digest, mem::Zeroizing};
 
 /// Derives a key using PBKDF2-HMAC as specified by RFC 8018 / PKCS #5.
 pub(crate) fn pbkdf2_hmac(
@@ -14,7 +14,7 @@ pub(crate) fn pbkdf2_hmac(
     salt: impl AsRef<[u8]>,
     iterations: u32,
     out_len: usize,
-) -> Result<Box<[u8]>, JoseError> {
+) -> Result<Zeroizing<Box<[u8]>>, JoseError> {
     let password = password.as_ref();
     let salt = salt.as_ref();
 
@@ -24,7 +24,7 @@ pub(crate) fn pbkdf2_hmac(
         ));
     }
 
-    let mut out = super::mem::new_boxed_slice(out_len);
+    let mut out = Zeroizing::new(super::mem::new_boxed_slice(out_len));
 
     let res = unsafe {
         PKCS5_PBKDF2_HMAC(

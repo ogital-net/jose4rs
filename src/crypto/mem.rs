@@ -1,4 +1,7 @@
-use std::alloc;
+use std::{
+    alloc,
+    ops::{Deref, DerefMut},
+};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{CRYPTO_memcmp, OPENSSL_cleanse};
@@ -18,6 +21,54 @@ pub(crate) fn cleanse(data: &mut [u8]) {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct Zeroizing<T: AsMut<[u8]>>(T);
+
+impl<T: AsMut<[u8]>> Zeroizing<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn as_inner_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
+impl<T> AsRef<[u8]> for Zeroizing<T>
+where
+    T: AsMut<[u8]> + AsRef<[u8]>,
+{
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl<T> Deref for Zeroizing<T>
+where
+    T: AsMut<[u8]> + AsRef<[u8]>,
+{
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref()
+    }
+}
+
+impl<T> DerefMut for Zeroizing<T>
+where
+    T: AsMut<[u8]> + AsRef<[u8]>,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0.as_mut()
+    }
+}
+
+impl<T: AsMut<[u8]>> Drop for Zeroizing<T> {
+    fn drop(&mut self) {
+        cleanse(self.0.as_mut());
+    }
+}
+
 pub(crate) fn new_boxed_slice(len: usize) -> Box<[u8]> {
     debug_assert!(len > 0);
     unsafe {
@@ -27,5 +78,19 @@ pub(crate) fn new_boxed_slice(len: usize) -> Box<[u8]> {
             alloc::handle_alloc_error(layout);
         }
         Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zeroizing_cleanses_on_drop() {
+        let mut bytes = [0x5a; 32];
+        {
+            let _secret = Zeroizing::new(bytes.as_mut_slice());
+        }
+        assert_eq!(bytes, [0; 32]);
     }
 }

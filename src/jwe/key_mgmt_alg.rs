@@ -208,34 +208,36 @@ impl KeyManagementAlgorithm {
         management_key: &JsonWebKey,
         encrypted_key: &[u8],
         headers: &simd_json::owned::Value,
-    ) -> Result<Box<[u8]>, JoseError> {
+    ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
         match self {
             KeyManagementAlgorithm::Rsa15 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key.decrypt_pcks1_1_5(encrypted_key),
+                JsonWebKey::Rsa(rsa_key) => rsa_key
+                    .decrypt_pcks1_1_5(encrypted_key)
+                    .map(mem::Zeroizing::new),
                 _ => Err(JoseError::InvalidKey("invalid key type".into())),
             },
             KeyManagementAlgorithm::RsaOaep => match management_key {
-                JsonWebKey::Rsa(rsa_key) => {
-                    rsa_key.decrypt_oaep(encrypted_key, DigestAlgorithm::Sha1)
-                }
+                JsonWebKey::Rsa(rsa_key) => rsa_key
+                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha1)
+                    .map(mem::Zeroizing::new),
                 _ => Err(JoseError::InvalidKey("invalid key type".into())),
             },
             KeyManagementAlgorithm::RsaOaep256 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => {
-                    rsa_key.decrypt_oaep(encrypted_key, DigestAlgorithm::Sha256)
-                }
+                JsonWebKey::Rsa(rsa_key) => rsa_key
+                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha256)
+                    .map(mem::Zeroizing::new),
                 _ => Err(JoseError::InvalidKey("invalid key type".into())),
             },
             KeyManagementAlgorithm::RsaOaep384 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => {
-                    rsa_key.decrypt_oaep(encrypted_key, DigestAlgorithm::Sha384)
-                }
+                JsonWebKey::Rsa(rsa_key) => rsa_key
+                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha384)
+                    .map(mem::Zeroizing::new),
                 _ => Err(JoseError::InvalidKey("invalid key type".into())),
             },
             KeyManagementAlgorithm::RsaOaep512 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => {
-                    rsa_key.decrypt_oaep(encrypted_key, DigestAlgorithm::Sha512)
-                }
+                JsonWebKey::Rsa(rsa_key) => rsa_key
+                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha512)
+                    .map(mem::Zeroizing::new),
                 _ => Err(JoseError::InvalidKey("invalid key type".into())),
             },
             KeyManagementAlgorithm::EcdhEs => {
@@ -278,15 +280,13 @@ impl KeyManagementAlgorithm {
                     .get_str(HeaderParameter::AgreementPartyVInfo.name())
                     .unwrap_or("");
                 let concat_kdf = kdf::ConcatKDF::init(DigestAlgorithm::Sha256);
-                Ok(concat_kdf
-                    .kdf(
-                        &shared_secret,
-                        content_enc_alg.key_len() * 8,
-                        content_enc_alg.name(),
-                        party_u_info,
-                        party_v_info,
-                    )?
-                    .into_boxed_slice())
+                concat_kdf.kdf(
+                    &shared_secret,
+                    content_enc_alg.key_len() * 8,
+                    content_enc_alg.name(),
+                    party_u_info,
+                    party_v_info,
+                )
             }
             KeyManagementAlgorithm::EcdhEsA128Kw => {
                 let epk = headers
@@ -447,7 +447,7 @@ impl KeyManagementAlgorithm {
                         "invalid authentication tag length".into(),
                     ));
                 }
-                let mut out: Box<[u8]> = Box::from(encrypted_key);
+                let mut out = mem::Zeroizing::new(Box::from(encrypted_key));
                 let ctx = aead::EvpAeadCtx::init(alg, key_bytes);
                 ctx.decrypt(&iv, &[], &mut out, &tag)?;
                 Ok(out)
@@ -479,7 +479,7 @@ impl KeyManagementAlgorithm {
                         "invalid authentication tag length".into(),
                     ));
                 }
-                let mut out: Box<[u8]> = Box::from(encrypted_key);
+                let mut out = mem::Zeroizing::new(Box::from(encrypted_key));
                 let ctx = aead::EvpAeadCtx::init(alg, key_bytes);
                 ctx.decrypt(&iv, &[], &mut out, &tag)?;
                 Ok(out)
@@ -511,7 +511,7 @@ impl KeyManagementAlgorithm {
                         "invalid authentication tag length".into(),
                     ));
                 }
-                let mut out: Box<[u8]> = Box::from(encrypted_key);
+                let mut out = mem::Zeroizing::new(Box::from(encrypted_key));
                 let ctx = aead::EvpAeadCtx::init(alg, key_bytes);
                 ctx.decrypt(&iv, &[], &mut out, &tag)?;
                 Ok(out)
@@ -540,7 +540,7 @@ impl KeyManagementAlgorithm {
                 let key_bytes = management_key
                     .key_bytes()
                     .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
-                Ok(Box::from(key_bytes))
+                Ok(mem::Zeroizing::new(Box::from(key_bytes)))
             }
         }
     }
@@ -561,7 +561,7 @@ impl KeyManagementAlgorithm {
         headers: &simd_json::owned::Value,
         digest_alg: DigestAlgorithm,
         kek_len: usize,
-    ) -> Result<Box<[u8]>, JoseError> {
+    ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
         let password = management_key
             .key_bytes()
             .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
