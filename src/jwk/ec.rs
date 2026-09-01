@@ -134,6 +134,22 @@ impl EcJsonWebKey {
         }
     }
 
+    /// Parses an EC JWK from a DER-encoded private or public key.
+    ///
+    /// Accepts PKCS#8 or SEC1 private keys and SPKI public keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DER is malformed or is not an EC key.
+    pub fn from_der(der: impl AsRef<[u8]>) -> Result<Self, JoseError> {
+        match super::JsonWebKey::from_der(der)? {
+            super::JsonWebKey::EllipticCurve(jwk) => Ok(jwk),
+            _ => Err(JoseError::InvalidKey(
+                "DER does not contain an EC key".into(),
+            )),
+        }
+    }
+
     /// Builds an EC JWK from the subject public key of a DER-encoded X.509
     /// certificate.
     ///

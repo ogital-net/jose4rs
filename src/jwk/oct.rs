@@ -42,6 +42,13 @@ impl OctetSequenceJsonWebKey {
         }
     }
 
+    /// Builds a symmetric JWK from raw key bytes.
+    ///
+    /// Algorithm, usage, and key ID metadata are left unset.
+    pub fn from_bytes(key: impl AsRef<[u8]>) -> Self {
+        Self::new(key.as_ref().into(), None)
+    }
+
     /// The key ID (`kid`), if set.
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
@@ -185,5 +192,22 @@ impl TryFrom<BTreeMap<String, String>> for OctetSequenceJsonWebKey {
 
     fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
         OctetSequenceJsonWebKey::from_map(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_bytes_preserves_key_and_leaves_metadata_unset() {
+        let bytes = [0x11, 0x22, 0x33, 0x44];
+        let key = OctetSequenceJsonWebKey::from_bytes(bytes);
+
+        assert_eq!(key.key_bytes(), bytes);
+        assert_eq!(key.key_size_bits(), 32);
+        assert_eq!(key.alg(), None);
+        assert_eq!(key.key_use(), None);
+        assert_eq!(key.key_id(), None);
     }
 }

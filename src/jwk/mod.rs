@@ -109,6 +109,30 @@ pub enum JsonWebKey {
     Oct(OctetSequenceJsonWebKey),
 }
 
+impl From<EcJsonWebKey> for JsonWebKey {
+    fn from(key: EcJsonWebKey) -> Self {
+        Self::EllipticCurve(key)
+    }
+}
+
+impl From<OkpJsonWebKey> for JsonWebKey {
+    fn from(key: OkpJsonWebKey) -> Self {
+        Self::OctetKeyPair(key)
+    }
+}
+
+impl From<RsaJsonWebKey> for JsonWebKey {
+    fn from(key: RsaJsonWebKey) -> Self {
+        Self::Rsa(key)
+    }
+}
+
+impl From<OctetSequenceJsonWebKey> for JsonWebKey {
+    fn from(key: OctetSequenceJsonWebKey) -> Self {
+        Self::Oct(key)
+    }
+}
+
 impl std::fmt::Debug for JsonWebKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -483,6 +507,16 @@ pub enum OkpCurve {
     Ed25519,
     /// The X25519 ECDH key-agreement curve (RFC 7748).
     X25519,
+}
+
+impl OkpCurve {
+    /// The JOSE curve name.
+    pub fn jose_name(self) -> &'static str {
+        match self {
+            Self::Ed25519 => "Ed25519",
+            Self::X25519 => "X25519",
+        }
+    }
 }
 
 /// Builds an RFC 7638 canonical JWK JSON object from a parsed JWK value and
@@ -1069,6 +1103,34 @@ mod tests {
         // Wrong type fails rather than silently coercing.
         assert!(ec::EcJsonWebKey::from_pem(&pem).is_err());
         assert!(okp::OkpJsonWebKey::from_pem(&pem).is_err());
+    }
+
+    #[test]
+    fn test_typed_from_der() {
+        let rsa = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::RsaUsingSha256)
+            .generate()
+            .unwrap();
+        let ec =
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
+                .generate()
+                .unwrap();
+        let okp = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EdDsa)
+            .generate()
+            .unwrap();
+
+        for der in [rsa.to_pkcs8_der().unwrap(), rsa.to_spki_der().unwrap()] {
+            assert!(rsa::RsaJsonWebKey::from_der(der).is_ok());
+        }
+        for der in [ec.to_pkcs8_der().unwrap(), ec.to_spki_der().unwrap()] {
+            assert!(ec::EcJsonWebKey::from_der(der).is_ok());
+        }
+        for der in [okp.to_pkcs8_der().unwrap(), okp.to_spki_der().unwrap()] {
+            assert!(okp::OkpJsonWebKey::from_der(der).is_ok());
+        }
+
+        let rsa_der = rsa.to_pkcs8_der().unwrap();
+        assert!(ec::EcJsonWebKey::from_der(&rsa_der).is_err());
+        assert!(okp::OkpJsonWebKey::from_der(&rsa_der).is_err());
     }
 
     #[test]

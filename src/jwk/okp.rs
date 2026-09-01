@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{EvpPkey, EvpPkeyType, X509Cert, curve25519::ed25519_pubkey_is_valid_for_private_key},
+    crypto::{EvpPkey, EvpPkeyType, X509Cert},
     error::JoseError,
     jws::AlgorithmIdentifier,
 };
 
-use super::{GetStr, OutputControlLevel};
+use super::{GetStr, OkpCurve, OutputControlLevel};
 
 #[derive(Clone)]
 /// An octet key pair JSON Web Key (`kty: "OKP"`), holding an Ed25519 or
@@ -36,6 +36,8 @@ impl std::fmt::Debug for OkpJsonWebKey {
 }
 
 impl OkpJsonWebKey {
+    const RAW_KEY_LEN: usize = 32;
+
     pub(crate) fn new(evp_pkey: EvpPkey, alg: Option<AlgorithmIdentifier>) -> Self {
         Self {
             evp_pkey,
@@ -45,6 +47,64 @@ impl OkpJsonWebKey {
             x5t: None,
             x5t_s256: None,
         }
+    }
+
+    /// Builds an Ed25519 or X25519 JWK from a raw public key.
+    ///
+    /// Both curves use exactly 32 bytes. Algorithm, usage, and key ID metadata
+    /// are left unset.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not exactly 32 bytes or the crypto
+    /// backend rejects it.
+    pub fn from_public_bytes(curve: OkpCurve, key: impl AsRef<[u8]>) -> Result<Self, JoseError> {
+        Self::from_owned_bytes(curve, key.as_ref().into(), false)
+    }
+
+    /// Builds an Ed25519 or X25519 JWK from raw private key bytes.
+    ///
+    /// Ed25519 input is the 32-byte private seed, not a 64-byte expanded key.
+    /// X25519 input is the 32-byte private scalar. The public key is derived by
+    /// the crypto backend. Algorithm, usage, and key ID metadata are left unset.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is not exactly 32 bytes or the crypto
+    /// backend rejects it.
+    pub fn from_private_bytes(curve: OkpCurve, key: impl AsRef<[u8]>) -> Result<Self, JoseError> {
+        Self::from_owned_bytes(curve, key.as_ref().into(), true)
+    }
+
+    fn from_owned_bytes(
+        curve: OkpCurve,
+        mut key: Box<[u8]>,
+        private: bool,
+    ) -> Result<Self, JoseError> {
+        let key_len = key.len();
+        if key_len != Self::RAW_KEY_LEN {
+            if private {
+                crate::crypto::mem::cleanse(&mut key);
+            }
+            let visibility = if private { "private" } else { "public" };
+            return Err(JoseError::InvalidKey(format!(
+                "invalid {visibility} key length for {}: expected {} bytes, got {}",
+                curve.jose_name(),
+                Self::RAW_KEY_LEN,
+                key_len
+            )));
+        }
+
+        let key_type = match curve {
+            OkpCurve::Ed25519 => EvpPkeyType::Ed25519,
+            OkpCurve::X25519 => EvpPkeyType::X25519,
+        };
+        let evp_pkey = if private {
+            EvpPkey::new_raw_private_key(key_type, &mut key)?
+        } else {
+            EvpPkey::new_raw_public_key(key_type, &mut key)?
+        };
+        Ok(Self::new(evp_pkey, None))
     }
 
     pub(super) fn from_evp_pkey(evp_pkey: EvpPkey) -> Self {
@@ -81,6 +141,35 @@ impl OkpJsonWebKey {
     /// The algorithm (`alg`) designated for this key, if set.
     pub fn alg(&self) -> Option<&'static str> {
         self.alg.map(|a| a.name())
+    }
+
+    /// The OKP curve.
+    pub fn curve(&self) -> OkpCurve {
+        match self.evp_pkey.key_type() {
+            EvpPkeyType::Ed25519 => OkpCurve::Ed25519,
+            EvpPkeyType::X25519 => OkpCurve::X25519,
+            _ => unreachable!("OkpJsonWebKey must contain an Ed25519 or X25519 key"),
+        }
+    }
+
+    /// Returns an owned copy of the raw 32-byte public key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the underlying key is not an Ed25519 or X25519 key. This is
+    /// only possible if an internal construction invariant is violated.
+    pub fn public_key_bytes(&self) -> Box<[u8]> {
+        self.evp_pkey
+            .get_raw_public_key()
+            .expect("OKP keys must have a raw public key")
+    }
+
+    /// Returns an owned copy of the raw 32-byte private key, if present.
+    ///
+    /// For Ed25519 this is the private seed; for X25519 it is the private
+    /// scalar. Callers are responsible for protecting the returned secret.
+    pub fn private_key_bytes(&self) -> Option<Box<[u8]>> {
+        self.evp_pkey.get_raw_private_key()
     }
 
     /// Serializes the key to DER (private PKCS#8 if private material is held,
@@ -129,6 +218,23 @@ impl OkpJsonWebKey {
             super::JsonWebKey::OctetKeyPair(jwk) => Ok(jwk),
             _ => Err(JoseError::InvalidKey(
                 "PEM does not contain an Ed25519 or X25519 key".into(),
+            )),
+        }
+    }
+
+    /// Parses an OKP JWK from a DER-encoded private or public key.
+    ///
+    /// Accepts PKCS#8 private keys and SPKI public keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DER is malformed or is not an Ed25519 or
+    /// X25519 key.
+    pub fn from_der(der: impl AsRef<[u8]>) -> Result<Self, JoseError> {
+        match super::JsonWebKey::from_der(der)? {
+            super::JsonWebKey::OctetKeyPair(jwk) => Ok(jwk),
+            _ => Err(JoseError::InvalidKey(
+                "DER does not contain an Ed25519 or X25519 key".into(),
             )),
         }
     }
@@ -279,11 +385,7 @@ impl OkpJsonWebKey {
 
     /// The JOSE curve name (`crv`): `Ed25519` or `X25519`.
     pub fn curve_name(&self) -> &'static str {
-        match self.evp_pkey.key_type() {
-            EvpPkeyType::Ed25519 => "Ed25519",
-            EvpPkeyType::X25519 => "X25519",
-            _ => "unknown",
-        }
+        self.curve().jose_name()
     }
 
     /// Signs a message with `EdDSA` (Ed25519 only; X25519 is key-agreement only).
@@ -301,7 +403,7 @@ impl OkpJsonWebKey {
     }
 
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let mut x = value.get("x").map_or_else(
+        let x = value.get("x").map_or_else(
             || Err(JoseError::InvalidKey("missing 'x' parameter".to_string())),
             |v| Ok(base64::url_decode(v)?),
         )?;
@@ -316,63 +418,29 @@ impl OkpJsonWebKey {
             None => None,
         };
 
-        let jwk = match value.get("crv") {
-            Some("Ed25519") => {
-                if let Some(mut private) = d {
-                    if private.len() != 32 {
-                        return Err(JoseError::InvalidKey(
-                            "invalid 'd' parameter length for Ed25519".to_string(),
-                        ));
-                    }
-                    if !ed25519_pubkey_is_valid_for_private_key(&private, &x) {
-                        return Err(JoseError::InvalidKey(
-                            "invalid 'x' parameter for Ed25519".to_string(),
-                        ));
-                    }
-                    Ok(OkpJsonWebKey::new(
-                        EvpPkey::new_raw_private_key(EvpPkeyType::Ed25519, &mut private),
-                        alg,
-                    ))
-                } else {
-                    if x.len() != 32 {
-                        return Err(JoseError::InvalidKey(
-                            "invalid 'x' parameter length for Ed25519".to_string(),
-                        ));
-                    }
-                    Ok(OkpJsonWebKey::new(
-                        EvpPkey::new_raw_public_key(EvpPkeyType::Ed25519, &mut x),
-                        alg,
-                    ))
-                }
-            }
-            Some("X25519") => {
-                if let Some(mut private) = d {
-                    if private.len() != 32 {
-                        return Err(JoseError::InvalidKey(
-                            "invalid 'd' parameter length for X25519".to_string(),
-                        ));
-                    }
-                    Ok(OkpJsonWebKey::new(
-                        EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &mut private),
-                        alg,
-                    ))
-                } else {
-                    if x.len() != 32 {
-                        return Err(JoseError::InvalidKey(
-                            "invalid 'x' parameter length for X25519".to_string(),
-                        ));
-                    }
-                    Ok(OkpJsonWebKey::new(
-                        EvpPkey::new_raw_public_key(EvpPkeyType::X25519, &mut x),
-                        alg,
-                    ))
-                }
-            }
+        let curve = match value.get("crv") {
+            Some("Ed25519") => Ok(OkpCurve::Ed25519),
+            Some("X25519") => Ok(OkpCurve::X25519),
             Some(crv) => Err(JoseError::InvalidKey(format!("unsupported curve '{crv}'"))),
             None => Err(JoseError::InvalidKey("missing 'crv' parameter".to_string())),
         }?;
 
-        let mut jwk = jwk;
+        let mut jwk = if let Some(private) = d {
+            let jwk = Self::from_owned_bytes(curve, private, true)?;
+            let derived_public = jwk.evp_pkey.get_raw_public_key().ok_or_else(|| {
+                JoseError::InvalidKey(format!("could not derive {} public key", curve.jose_name()))
+            })?;
+            if x.as_ref() != derived_public.as_ref() {
+                return Err(JoseError::InvalidKey(format!(
+                    "'x' does not match the {} private key",
+                    curve.jose_name()
+                )));
+            }
+            jwk
+        } else {
+            Self::from_owned_bytes(curve, x, false)?
+        };
+        jwk.alg = alg;
         jwk.x5t = value.get("x5t").map(str::to_string);
         jwk.x5t_s256 = value.get("x5t#S256").map(str::to_string);
         jwk.key_id = value.get("kid").map(str::to_string);
@@ -425,6 +493,58 @@ mod tests {
     }
 
     #[test]
+    fn constructs_ed25519_from_raw_private_and_public_bytes() {
+        let private = base64::url_decode("nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A").unwrap();
+        let public = base64::url_decode("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo").unwrap();
+
+        let private_key = OkpJsonWebKey::from_private_bytes(OkpCurve::Ed25519, &private).unwrap();
+        let public_key = OkpJsonWebKey::from_public_bytes(OkpCurve::Ed25519, &public).unwrap();
+        let signature = private_key.sign(b"raw key constructor").unwrap();
+
+        assert!(public_key.verify(b"raw key constructor", &signature));
+        assert_eq!(private_key.curve(), OkpCurve::Ed25519);
+        assert_eq!(private_key.curve_name(), "Ed25519");
+        assert_eq!(private_key.public_key_bytes().as_ref(), public.as_ref());
+        assert_eq!(
+            private_key.private_key_bytes().unwrap().as_ref(),
+            private.as_ref()
+        );
+        assert_eq!(public_key.public_key_bytes().as_ref(), public.as_ref());
+        assert!(public_key.private_key_bytes().is_none());
+        assert_eq!(private_key.alg(), None);
+        assert_eq!(private_key.key_use(), None);
+        assert_eq!(private_key.key_id(), None);
+        assert_eq!(
+            private.as_ref(),
+            base64::url_decode("nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A")
+                .unwrap()
+                .as_ref()
+        );
+    }
+
+    #[test]
+    fn constructs_x25519_from_raw_private_and_public_bytes() {
+        let private = [0x42; 32];
+        let private_key = OkpJsonWebKey::from_private_bytes(OkpCurve::X25519, private).unwrap();
+        let public = private_key.evp_pkey.get_raw_public_key().unwrap();
+        let public_key = OkpJsonWebKey::from_public_bytes(OkpCurve::X25519, public).unwrap();
+
+        assert_eq!(private_key.curve_name(), "X25519");
+        assert_eq!(public_key.curve_name(), "X25519");
+        assert_eq!(private, [0x42; 32]);
+    }
+
+    #[test]
+    fn raw_constructors_reject_wrong_key_lengths() {
+        for curve in [OkpCurve::Ed25519, OkpCurve::X25519] {
+            assert!(OkpJsonWebKey::from_private_bytes(curve, [0; 31]).is_err());
+            assert!(OkpJsonWebKey::from_private_bytes(curve, [0; 33]).is_err());
+            assert!(OkpJsonWebKey::from_public_bytes(curve, [0; 31]).is_err());
+            assert!(OkpJsonWebKey::from_public_bytes(curve, [0; 33]).is_err());
+        }
+    }
+
+    #[test]
     fn rejects_ed25519_private_key_of_wrong_length() {
         // 'd' decodes to 16 bytes; Ed25519 requires 32.
         let json = r#"{"kty":"OKP","crv":"Ed25519","d":"nWGxne_9WmC6hEr0kuwsxA","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
@@ -449,6 +569,12 @@ mod tests {
     fn rejects_x25519_private_key_of_wrong_length() {
         // 'd' decodes to 16 bytes; X25519 requires 32.
         let json = r#"{"kty":"OKP","crv":"X25519","d":"nWGxne_9WmC6hEr0kuwsxA","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
+        assert!(parse(json).is_err());
+    }
+
+    #[test]
+    fn rejects_x25519_private_key_with_mismatched_public_key() {
+        let json = r#"{"kty":"OKP","crv":"X25519","d":"nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
         assert!(parse(json).is_err());
     }
 

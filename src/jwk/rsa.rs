@@ -64,7 +64,8 @@ impl RsaJsonWebKey {
         &self.evp_pkey
     }
 
-    pub(crate) fn set_key_use(&mut self, key_use: super::KeyUse) {
+    /// Sets the key usage (`use`).
+    pub fn set_key_use(&mut self, key_use: super::KeyUse) {
         self.key_use = Some(key_use);
     }
 
@@ -133,6 +134,22 @@ impl RsaJsonWebKey {
             super::JsonWebKey::Rsa(jwk) => Ok(jwk),
             _ => Err(JoseError::InvalidKey(
                 "PEM does not contain an RSA key".into(),
+            )),
+        }
+    }
+
+    /// Parses an RSA JWK from a DER-encoded private or public key.
+    ///
+    /// Accepts PKCS#8 or PKCS#1 private keys and SPKI public keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DER is malformed or is not an RSA key.
+    pub fn from_der(der: impl AsRef<[u8]>) -> Result<Self, JoseError> {
+        match super::JsonWebKey::from_der(der)? {
+            super::JsonWebKey::Rsa(jwk) => Ok(jwk),
+            _ => Err(JoseError::InvalidKey(
+                "DER does not contain an RSA key".into(),
             )),
         }
     }

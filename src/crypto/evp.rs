@@ -118,24 +118,32 @@ impl EvpPkey {
         unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
     }
 
-    pub(crate) fn new_raw_private_key(key_type: EvpPkeyType, key: &mut [u8]) -> Self {
+    pub(crate) fn new_raw_private_key(
+        key_type: EvpPkeyType,
+        key: &mut [u8],
+    ) -> Result<Self, JoseError> {
         let ptr = unsafe {
             // the key is duplicated and ownership is not transferred
             EVP_PKEY_new_raw_private_key(key_type.into(), ptr::null_mut(), key.as_ptr(), key.len())
         };
-        assert!(!ptr.is_null());
         mem::cleanse(key);
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        let ptr = ptr::NonNull::new(ptr)
+            .ok_or_else(|| JoseError::InvalidKey("invalid raw private key".into()))?;
+        Ok(Self(ptr))
     }
 
-    pub(crate) fn new_raw_public_key(key_type: EvpPkeyType, key: &mut [u8]) -> Self {
+    pub(crate) fn new_raw_public_key(
+        key_type: EvpPkeyType,
+        key: &mut [u8],
+    ) -> Result<Self, JoseError> {
         let ptr = unsafe {
             // the key is duplicated and ownership is not transferred
             EVP_PKEY_new_raw_public_key(key_type.into(), ptr::null_mut(), key.as_ptr(), key.len())
         };
-        assert!(!ptr.is_null());
         mem::cleanse(key);
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        let ptr = ptr::NonNull::new(ptr)
+            .ok_or_else(|| JoseError::InvalidKey("invalid raw public key".into()))?;
+        Ok(Self(ptr))
     }
 
     pub(super) fn from_ptr(ptr: *mut EVP_PKEY) -> Self {
@@ -186,6 +194,7 @@ impl EvpPkey {
         let mut out_private_key = [0u8; 64];
         ed25519_keypair(&mut out_public_key, &mut out_private_key);
         EvpPkey::new_raw_private_key(EvpPkeyType::Ed25519, &mut out_private_key[..32])
+            .expect("generated Ed25519 private key should be valid")
     }
 
     pub(crate) fn generate_x25519() -> Self {
@@ -193,6 +202,7 @@ impl EvpPkey {
         let mut out_private_key = [0u8; 32];
         x25519_keypair(&mut out_public_value, &mut out_private_key);
         EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &mut out_private_key)
+            .expect("generated X25519 private key should be valid")
     }
 
     fn as_mut_ptr(&mut self) -> *mut EVP_PKEY {
