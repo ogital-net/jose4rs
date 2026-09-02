@@ -8,6 +8,7 @@ A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516
 [RFC 7519]: https://tools.ietf.org/html/rfc7519
 [RFC 7797]: https://tools.ietf.org/html/rfc7797
 [RFC 7638]: https://tools.ietf.org/html/rfc7638
+[RFC 9964]: https://tools.ietf.org/html/rfc9964
 [jose4j]: https://bitbucket.org/b_c/jose4j
 
 ## Status
@@ -27,6 +28,7 @@ This crate contains **no cryptographic primitives of its own**. All cryptography
 | RSA-PSS | PS256, PS384, PS512 |
 | ECDSA | ES256, ES384, ES512, ES256K (secp256k1) |
 | EdDSA | Ed25519 |
+| ML-DSA (optional) | ML-DSA-44, ML-DSA-65, ML-DSA-87 |
 | Unsecured | `none` (blocked by default) |
 
 The general (multi-signature) JSON serialization and unprotected headers are **not** supported.
@@ -40,7 +42,7 @@ The general (multi-signature) JSON serialization and unprotected headers are **n
 
 C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its extended-nonce variant), included for jose4j interoperability. The JWE JSON serialization is **not** supported. RSA1_5 and the PBES2 algorithms are blocked by default. The `zip` (DEFLATE compression) header is supported behind the optional `zip` feature (see below).
 
-**JWK** — all four key types (`RSA`, `EC`, `OKP`, `oct`); JSON and PEM/PKCS#8/SPKI/DER import/export; thumbprints (RFC 7638); key generation via `JsonWebKeyGenerator`; key sets with kid-based lookup. EC curves: P-256, P-384, P-521, secp256k1. OKP curves: Ed25519, X25519. Ed448 and X448 are **not** supported (not provided by the crypto backends).
+**JWK** - `RSA`, `EC`, `OKP`, and `oct` keys, plus optional `AKP` keys for ML-DSA; JSON and PEM/PKCS#8/SPKI/DER import/export; thumbprints (RFC 7638 and [RFC 9964]); key generation via `JsonWebKeyGenerator`; key sets with kid-based lookup. EC curves: P-256, P-384, P-521, secp256k1. OKP curves: Ed25519, X25519. Ed448 and X448 are **not** supported (not provided by the crypto backends).
 
 **JWT** — claims construction/parsing and a validating consumer modeled on jose4j's `JwtConsumer`: issuer/audience/subject validation, temporal validation (`exp`, `nbf`, `iat`) with configurable clock skew, required-claim enforcement, prohibited claims, and max-future-validity. Nested JWT (JWS inside JWE) is supported.
 
@@ -64,6 +66,7 @@ C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its ext
 | `boring` | BoringSSL cryptography backend. Mutually exclusive with `aws-lc`. |
 | `base64-simd` (default) | SIMD-accelerated base64. |
 | `base64` | Portable (non-SIMD) base64 fallback. |
+| `pq-ml-dsa` | ML-DSA signatures and AKP JWKs ([RFC 9964]); implies `aws-lc`. |
 | `jwks-https` | Blocking HTTPS JWKS fetching (bring your own transport). |
 | `jwks-https-async` | Async HTTPS JWKS fetching; implies `jwks-https`. |
 | `zip` | DEFLATE (`zip: DEF`, RFC 1951) compression of the JWE plaintext, via `flate2`. |

@@ -16,6 +16,8 @@ use simd_json::{
     prelude::{ValueObjectAccess, Writable as _},
 };
 
+#[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+use crate::jwk::ml_dsa::MlDsaParameterSet;
 use crate::{
     BufferRef, base64,
     crypto::DigestAlgorithm,
@@ -396,6 +398,32 @@ impl<'a> JsonWebSignature<'a> {
                     key.key_type()
                 ))),
             },
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44
+            | AlgorithmIdentifier::MlDsa65
+            | AlgorithmIdentifier::MlDsa87 => match key {
+                JsonWebKey::MlDsa(ml_dsa) => {
+                    let params_name = alg.ml_dsa_parameter_set_name().ok_or_else(|| {
+                        JoseError::InvalidAlgorithm(format!(
+                            "no ML-DSA parameter set for algorithm {}",
+                            alg.name()
+                        ))
+                    })?;
+                    let params = MlDsaParameterSet::from_jose_name(params_name)?;
+                    if ml_dsa.parameter_set() != params {
+                        return Err(JoseError::InvalidKey(format!(
+                            "{} key cannot verify a {} signature",
+                            ml_dsa.parameter_set().jose_name(),
+                            params.jose_name(),
+                        )));
+                    }
+                    Ok(ml_dsa.verify(verification_input, signature.get(&self.buffer)))
+                }
+                _ => Err(JoseError::InvalidKey(format!(
+                    "invalid key type {}",
+                    key.key_type()
+                ))),
+            },
             _ => unreachable!("unsupported algorithm"),
         }
     }
@@ -595,6 +623,34 @@ impl<'a> JsonWebSignature<'a> {
             AlgorithmIdentifier::RsaPssUsingSha512 => match key {
                 JsonWebKey::Rsa(rsa_key) => {
                     Some(rsa_key.sign_rsa_pss(input, DigestAlgorithm::Sha512))
+                }
+                _ => {
+                    return Err(JoseError::InvalidKey(format!(
+                        "invalid key type {}",
+                        key.key_type()
+                    )));
+                }
+            },
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44
+            | AlgorithmIdentifier::MlDsa65
+            | AlgorithmIdentifier::MlDsa87 => match key {
+                JsonWebKey::MlDsa(ml_dsa) => {
+                    let params_name = alg.ml_dsa_parameter_set_name().ok_or_else(|| {
+                        JoseError::InvalidAlgorithm(format!(
+                            "no ML-DSA parameter set for algorithm {}",
+                            alg.name()
+                        ))
+                    })?;
+                    let params = MlDsaParameterSet::from_jose_name(params_name)?;
+                    if ml_dsa.parameter_set() != params {
+                        return Err(JoseError::InvalidKey(format!(
+                            "{} key cannot sign with {}",
+                            ml_dsa.parameter_set().jose_name(),
+                            params.jose_name(),
+                        )));
+                    }
+                    Some(ml_dsa.sign(input)?)
                 }
                 _ => {
                     return Err(JoseError::InvalidKey(format!(
@@ -1043,6 +1099,18 @@ impl<'a> JsonWebSignature<'a> {
                     need += base64::url_encode_size(rsa.key_size_bits() / 8);
                 }
             }
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44 => {
+                need += base64::url_encode_size(2420);
+            }
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa65 => {
+                need += base64::url_encode_size(3309);
+            }
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa87 => {
+                need += base64::url_encode_size(4627);
+            }
         }
 
         let mut out = Vec::with_capacity(need);
@@ -1139,6 +1207,22 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
                 return Err(JoseError::InvalidKey(format!(
                     "key curve '{}' cannot be used with {alg}; an Ed25519 key is required",
                     okp_key.curve_name()
+                )));
+            }
+            Ok(())
+        }
+        #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+        JsonWebKey::MlDsa(ml_dsa_key) => {
+            // RFC 9964 Section 3: the ML-DSA algorithm pins the parameter set, so
+            // an ML-DSA-65 key cannot be used to sign an ML-DSA-44 JWS.
+            if let Some(required_name) = alg.ml_dsa_parameter_set_name()
+                && let Ok(required) = MlDsaParameterSet::from_jose_name(required_name)
+                && ml_dsa_key.parameter_set() != required
+            {
+                return Err(JoseError::InvalidKey(format!(
+                    "key parameter set '{}' does not match the parameter set '{}' required by {alg}",
+                    ml_dsa_key.parameter_set().jose_name(),
+                    required.jose_name(),
                 )));
             }
             Ok(())
@@ -1528,6 +1612,12 @@ mod tests {
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512,
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa65,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa87,
         ] {
             let key = JsonWebKeyGenerator::for_signature(alg).generate().unwrap();
             let mut jws = JsonWebSignature::new();
@@ -1559,6 +1649,12 @@ mod tests {
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512,
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa65,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa87,
         ] {
             let key = JsonWebKeyGenerator::for_signature(alg).generate().unwrap();
             let mut jws = JsonWebSignature::new();

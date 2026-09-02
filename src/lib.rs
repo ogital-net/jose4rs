@@ -28,7 +28,8 @@
 //! - **No panics on attacker-controlled input.** Malformed tokens and keys
 //!   return [`error::JoseError`]; panics are reserved for internal invariants.
 //! - **Backend flexibility.** Cryptography is provided by [aws-lc-rs] (default)
-//!   or [BoringSSL], selected by feature flag; the public API is identical.
+//!   or [BoringSSL], selected by feature flag. ML-DSA is currently available
+//!   only with AWS-LC.
 //!
 //! [aws-lc-rs]: https://crates.io/crates/aws-lc-rs
 //! [BoringSSL]: https://github.com/google/boringssl
@@ -41,6 +42,7 @@
 //! | `boring` | Use the `BoringSSL` cryptography backend. Mutually exclusive with `aws-lc`. |
 //! | `base64-simd` (default) | SIMD-accelerated base64. |
 //! | `base64` | Portable (non-SIMD) base64 fallback. |
+//! | `pq-ml-dsa` | ML-DSA signatures and AKP JWKs (RFC 9964); implies `aws-lc`. |
 //! | `jwks-https` | Blocking HTTPS JWKS fetching (bring your own transport). |
 //! | `jwks-https-async` | Async HTTPS JWKS fetching; implies `jwks-https`. |
 //!

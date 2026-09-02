@@ -1,5 +1,7 @@
 use std::{mem::ManuallyDrop, ptr};
 
+#[cfg(all(feature = "aws-lc", feature = "pq-ml-dsa"))]
+use aws_lc_sys::EVP_PKEY_get_private_seed;
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
     EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign, EVP_DigestSignInit,
@@ -60,6 +62,12 @@ pub(crate) enum EvpPkeyType {
     X25519,
     Hkdf,
     Dh,
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa44,
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa65,
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa87,
 }
 
 impl EvpPkeyType {
@@ -74,6 +82,12 @@ impl EvpPkeyType {
             EvpPkeyType::X25519 => EVP_PKEY_X25519,
             EvpPkeyType::Hkdf => EVP_PKEY_HKDF,
             EvpPkeyType::Dh => EVP_PKEY_DH,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            EvpPkeyType::MlDsa44 => aws_lc_sys::NID_MLDSA44,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            EvpPkeyType::MlDsa65 => aws_lc_sys::NID_MLDSA65,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            EvpPkeyType::MlDsa87 => aws_lc_sys::NID_MLDSA87,
         }
     }
 }
@@ -82,6 +96,16 @@ impl TryFrom<i32> for EvpPkeyType {
     type Error = JoseError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
+        #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+        {
+            use aws_lc_sys::{NID_MLDSA44, NID_MLDSA65, NID_MLDSA87};
+            match value {
+                NID_MLDSA44 => return Ok(EvpPkeyType::MlDsa44),
+                NID_MLDSA65 => return Ok(EvpPkeyType::MlDsa65),
+                NID_MLDSA87 => return Ok(EvpPkeyType::MlDsa87),
+                _ => {}
+            }
+        }
         match value {
             EVP_PKEY_NONE => Ok(EvpPkeyType::None),
             EVP_PKEY_RSA => Ok(EvpPkeyType::Rsa),
@@ -141,9 +165,40 @@ impl EvpPkey {
         Ok(Self(ptr))
     }
 
+    /// Constructs an `EVP_PKEY` from the raw FIPS 204 public-key bytes for an
+    /// ML-DSA parameter set. Uses `EVP_PKEY_pqdsa_new_raw_public_key` because
+    /// the generic `EVP_PKEY_new_raw_public_key` does not currently dispatch
+    /// into the PQDSA code path.
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    pub(crate) fn new_pqdsa_raw_public_key(
+        params: crate::jwk::ml_dsa::MlDsaParameterSet,
+        key: &[u8],
+    ) -> Result<Self, JoseError> {
+        let ptr = unsafe {
+            aws_lc_sys::EVP_PKEY_pqdsa_new_raw_public_key(params.nid(), key.as_ptr(), key.len())
+        };
+        let ptr = ptr::NonNull::new(ptr)
+            .ok_or_else(|| JoseError::InvalidKey("invalid ML-DSA raw public key".into()))?;
+        Ok(Self(ptr))
+    }
+
     pub(super) fn from_ptr(ptr: *mut EVP_PKEY) -> Self {
         assert!(!ptr.is_null());
         unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+    }
+
+    /// Like [`Self::from_ptr`] but `pub(crate)`, so callers in sibling modules
+    /// outside `crypto` (e.g. `jwk::ml_dsa`) can wrap a raw `EVP_PKEY*` they
+    /// took ownership of via a different path (e.g. handing off an
+    /// `MlDsaKey::into_raw`).
+    ///
+    /// # Safety
+    ///
+    /// The pointer must be a valid `EVP_PKEY*` with a single owner; this
+    /// `EvpPkey` will free it on drop.
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    pub(crate) unsafe fn from_raw_ptr(ptr: *mut EVP_PKEY) -> Self {
+        Self::from_ptr(ptr)
     }
 
     pub(crate) fn from_rsa(mut rsa: Rsa) -> Self {
@@ -200,6 +255,18 @@ impl EvpPkey {
             .expect("generated X25519 private key should be valid")
     }
 
+    /// Generates a fresh ML-DSA key pair using the OS RNG. Only available
+    /// behind the `pq-ml-dsa` feature (which requires `aws-lc-sys`).
+    #[cfg(feature = "pq-ml-dsa")]
+    pub(crate) fn generate_ml_dsa(params: crate::jwk::ml_dsa::MlDsaParameterSet) -> Self {
+        // Build via `MlDsaKey::generate` and transfer ownership of the raw
+        // `EVP_PKEY*` into an `EvpPkey`. Avoids duplicating the keygen logic.
+        let key = crate::crypto::MlDsaKey::generate(params)
+            .expect("AWS-LC ML-DSA key generation should not fail");
+        let raw = key.into_raw();
+        unsafe { Self::from_raw_ptr(raw) }
+    }
+
     fn as_mut_ptr(&mut self) -> *mut EVP_PKEY {
         self.0.as_ptr()
     }
@@ -209,6 +276,18 @@ impl EvpPkey {
     }
 
     pub(crate) fn key_type(&self) -> EvpPkeyType {
+        // For PQDSA keys `EVP_PKEY_id` returns the umbrella `NID_PQDSA` rather
+        // than the parameter-specific NID; resolve the latter via
+        // `EVP_PKEY_pqdsa_get_type` so callers can distinguish
+        // ML-DSA-44/65/87. Falls back to `EVP_PKEY_id` for non-PQDSA keys.
+        #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+        {
+            let base_id = unsafe { EVP_PKEY_id(self.as_ptr()) };
+            if base_id == aws_lc_sys::EVP_PKEY_PQDSA {
+                let param_id = unsafe { aws_lc_sys::EVP_PKEY_pqdsa_get_type(self.as_ptr()) };
+                return param_id.try_into().unwrap_or(EvpPkeyType::None);
+            }
+        }
         unsafe { EVP_PKEY_id(self.as_ptr()) }.try_into().unwrap()
     }
 
@@ -334,6 +413,29 @@ impl EvpPkey {
         // EdDSA requires an Edwards-curve key (Ed25519). Any other key (e.g.
         // X25519) cannot verify; report the signature as invalid.
         if self.key_type() != EvpPkeyType::Ed25519 {
+            return false;
+        }
+        self.verify_internal(message, None, signature, false)
+    }
+
+    /// Pure ML-DSA signing (no prehash, empty context).
+    ///
+    /// The caller is responsible for confirming that `self` is an ML-DSA
+    /// private key (one of `EvpPkeyType::MlDsa{44,65,87}`); this method does
+    /// not double-check so it can be called from the AKP dispatch path that
+    /// has already validated the key type.
+    #[cfg(feature = "pq-ml-dsa")]
+    pub(crate) fn sign_ml_dsa(&self, message: &[u8]) -> Result<Box<[u8]>, JoseError> {
+        self.sign_internal(message, None, false)
+    }
+
+    /// Pure ML-DSA verification. Returns false for keys that are not ML-DSA.
+    #[cfg(feature = "pq-ml-dsa")]
+    pub(crate) fn verify_ml_dsa(&self, message: &[u8], signature: &[u8]) -> bool {
+        if !matches!(
+            self.key_type(),
+            EvpPkeyType::MlDsa44 | EvpPkeyType::MlDsa65 | EvpPkeyType::MlDsa87
+        ) {
             return false;
         }
         self.verify_internal(message, None, signature, false)
@@ -548,7 +650,40 @@ impl EvpPkey {
             Some(b)
         }
     }
-
+    /// Returns the 32-byte ML-DSA seed (RFC 9964 Section 4 private-key form) for
+    /// ML-DSA private keys, or `None` otherwise. The seed is the value
+    /// originally supplied to `EVP_PKEY_pqdsa_new_raw_private_key`.
+    ///
+    /// AWS-LC may return an expanded private key from `EVP_PKEY_get_raw_private_key`
+    /// for some PQ schemes, so we deliberately use `EVP_PKEY_get_private_seed`
+    /// which always returns the seed form for ML-DSA.
+    #[cfg(all(feature = "aws-lc", feature = "pq-ml-dsa"))]
+    pub(crate) fn get_ml_dsa_seed(&self) -> Option<Box<[u8]>> {
+        if !matches!(
+            self.key_type(),
+            EvpPkeyType::MlDsa44 | EvpPkeyType::MlDsa65 | EvpPkeyType::MlDsa87
+        ) {
+            return None;
+        }
+        let mut need = 0usize;
+        if 1 != unsafe { EVP_PKEY_get_private_seed(self.as_ptr(), ptr::null_mut(), &mut need) } {
+            return None;
+        }
+        if need != 32 {
+            // RFC 9964 Section 4 mandates the 32-byte seed form. Surface the
+            // discrepancy rather than returning an oversized buffer that the
+            // JWK layer would treat as `priv`.
+            return None;
+        }
+        unsafe {
+            let mut b = mem::new_boxed_slice(need);
+            assert!(
+                1 == EVP_PKEY_get_private_seed(self.as_ptr(), b.as_mut_ptr(), &mut need),
+                "EVP_PKEY_get_private_seed() failed"
+            );
+            Some(b)
+        }
+    }
     fn rsaes_init(
         &self,
         encrypt: bool,

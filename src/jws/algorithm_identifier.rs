@@ -36,6 +36,15 @@ pub enum AlgorithmIdentifier {
     RsaPssUsingSha384,
     /// PS512
     RsaPssUsingSha512,
+    /// ML-DSA-44 (FIPS 204 / RFC 9964 Section 3.1, alg value -48).
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa44,
+    /// ML-DSA-65 (FIPS 204 / RFC 9964 Section 3.1, alg value -49).
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa65,
+    /// ML-DSA-87 (FIPS 204 / RFC 9964 Section 3.1, alg value -50).
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa87,
 }
 
 impl std::str::FromStr for AlgorithmIdentifier {
@@ -59,6 +68,12 @@ impl std::str::FromStr for AlgorithmIdentifier {
             "PS256" => Ok(AlgorithmIdentifier::RsaPssUsingSha256),
             "PS384" => Ok(AlgorithmIdentifier::RsaPssUsingSha384),
             "PS512" => Ok(AlgorithmIdentifier::RsaPssUsingSha512),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            "ML-DSA-44" => Ok(AlgorithmIdentifier::MlDsa44),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            "ML-DSA-65" => Ok(AlgorithmIdentifier::MlDsa65),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            "ML-DSA-87" => Ok(AlgorithmIdentifier::MlDsa87),
             alg => Err(JoseError::InvalidAlgorithm(format!(
                 "unsupported algorithm: {alg}"
             ))),
@@ -86,11 +101,17 @@ impl AlgorithmIdentifier {
             AlgorithmIdentifier::RsaPssUsingSha256 => "PS256",
             AlgorithmIdentifier::RsaPssUsingSha384 => "PS384",
             AlgorithmIdentifier::RsaPssUsingSha512 => "PS512",
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44 => "ML-DSA-44",
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa65 => "ML-DSA-65",
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa87 => "ML-DSA-87",
         }
     }
 
     /// The JWK `kty` (key type) a key for this algorithm belongs to:
-    /// `"RSA"`, `"EC"`, `"OKP"`, or `"oct"`. `None` for the `none` algorithm.
+    /// `"RSA"`, `"EC"`, `"OKP"`, `"AKP"`, or `"oct"`. `None` for the `none` algorithm.
     pub fn key_type(&self) -> Option<&'static str> {
         match self {
             AlgorithmIdentifier::None => None,
@@ -109,6 +130,10 @@ impl AlgorithmIdentifier {
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => Some("EC"),
             AlgorithmIdentifier::EdDsa => Some("OKP"),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            AlgorithmIdentifier::MlDsa44
+            | AlgorithmIdentifier::MlDsa65
+            | AlgorithmIdentifier::MlDsa87 => Some("AKP"),
         }
     }
 
@@ -123,6 +148,22 @@ impl AlgorithmIdentifier {
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512 => Some("P-521"),
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => Some("secp256k1"),
+            _ => None,
+        }
+    }
+
+    /// The ML-DSA parameter-set JOSE name this algorithm targets, if any.
+    ///
+    /// Returns `Some("ML-DSA-44" | "ML-DSA-65" | "ML-DSA-87")` for the
+    /// matching `AlgorithmIdentifier`, `None` for every other algorithm.
+    /// The result is independent of the `boring` feature (which currently
+    /// does not expose ML-DSA upstream).
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    pub fn ml_dsa_parameter_set_name(&self) -> Option<&'static str> {
+        match self {
+            AlgorithmIdentifier::MlDsa44 => Some("ML-DSA-44"),
+            AlgorithmIdentifier::MlDsa65 => Some("ML-DSA-65"),
+            AlgorithmIdentifier::MlDsa87 => Some("ML-DSA-87"),
             _ => None,
         }
     }

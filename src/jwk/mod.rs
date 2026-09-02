@@ -19,6 +19,11 @@ pub mod ec;
 mod https;
 #[cfg(feature = "jwks-https-async")]
 mod https_async;
+/// ML-DSA (`AKP`) JSON Web Keys (RFC 9964).
+#[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+pub mod ml_dsa;
+#[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+pub use ml_dsa::{MlDsaJsonWebKey, MlDsaParameterSet};
 /// Symmetric (`oct`) JSON Web Keys.
 pub mod oct;
 /// Octet key pair (`OKP`) JSON Web Keys (Ed25519, X25519).
@@ -95,8 +100,8 @@ pub enum OutputControlLevel {
 /// A JSON Web Key (RFC 7517).
 ///
 /// An enum over the supported key types (`kty`): RSA, elliptic curve (EC),
-/// octet key pair (OKP), and symmetric (oct). Parse with
-/// [`JsonWebKey::from_json`] or [`JsonWebKey::from_pem`].
+/// octet key pair (OKP), symmetric (oct), and ML-DSA (AKP, RFC 9964).
+/// Parse with [`JsonWebKey::from_json`] or [`JsonWebKey::from_pem`].
 #[derive(Clone)]
 pub enum JsonWebKey {
     /// An elliptic-curve key (`kty: "EC"`).
@@ -107,6 +112,9 @@ pub enum JsonWebKey {
     Rsa(RsaJsonWebKey),
     /// A symmetric (shared-secret) key (`kty: "oct"`).
     Oct(OctetSequenceJsonWebKey),
+    /// An ML-DSA post-quantum key (`kty: "AKP"`, RFC 9964).
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    MlDsa(MlDsaJsonWebKey),
 }
 
 impl From<EcJsonWebKey> for JsonWebKey {
@@ -133,6 +141,13 @@ impl From<OctetSequenceJsonWebKey> for JsonWebKey {
     }
 }
 
+#[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+impl From<MlDsaJsonWebKey> for JsonWebKey {
+    fn from(key: MlDsaJsonWebKey) -> Self {
+        Self::MlDsa(key)
+    }
+}
+
 impl std::fmt::Debug for JsonWebKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -140,6 +155,8 @@ impl std::fmt::Debug for JsonWebKey {
             JsonWebKey::OctetKeyPair(k) => std::fmt::Debug::fmt(k, f),
             JsonWebKey::Rsa(k) => std::fmt::Debug::fmt(k, f),
             JsonWebKey::Oct(k) => std::fmt::Debug::fmt(k, f),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(k) => std::fmt::Debug::fmt(k, f),
         }
     }
 }
@@ -186,9 +203,11 @@ impl JsonWebKey {
                 "EC" => JsonWebKey::EllipticCurve(EcJsonWebKey::from_map(value)?),
                 "oct" => JsonWebKey::Oct(OctetSequenceJsonWebKey::from_map(value)?),
                 "OKP" => JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_map(value)?),
+                #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+                "AKP" => JsonWebKey::MlDsa(MlDsaJsonWebKey::from_map(value)?),
                 _ => {
                     return Err(JoseError::InvalidJson(
-                        "'kty' must be one of 'EC', RSA', 'OKP', or 'oct'".into(),
+                        "'kty' must be one of 'EC', RSA', 'OKP', 'AKP', or 'oct'".into(),
                     ));
                 }
             },
@@ -205,9 +224,11 @@ impl JsonWebKey {
                 "EC" => JsonWebKey::EllipticCurve(EcJsonWebKey::from_map(value)?),
                 "oct" => JsonWebKey::Oct(OctetSequenceJsonWebKey::from_map(value)?),
                 "OKP" => JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_map(value)?),
+                #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+                "AKP" => JsonWebKey::MlDsa(MlDsaJsonWebKey::from_map(value)?),
                 _ => {
                     return Err(JoseError::InvalidJson(
-                        "'kty' must be one of 'EC', RSA', 'OKP', or 'oct'".into(),
+                        "'kty' must be one of 'EC', RSA', 'OKP', 'AKP', or 'oct'".into(),
                     ));
                 }
             },
@@ -247,6 +268,10 @@ impl JsonWebKey {
             EvpPkeyType::X25519 => Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_evp_pkey(
                 evp_pkey,
             ))),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            EvpPkeyType::MlDsa44 | EvpPkeyType::MlDsa65 | EvpPkeyType::MlDsa87 => {
+                Ok(JsonWebKey::MlDsa(MlDsaJsonWebKey::from_evp_pkey(evp_pkey)))
+            }
             _ => Err(JoseError::InvalidKey("unsupported key type".into())),
         }
     }
@@ -262,6 +287,10 @@ impl JsonWebKey {
             EvpPkeyType::Ed25519 | EvpPkeyType::X25519 => Ok(JsonWebKey::OctetKeyPair(
                 OkpJsonWebKey::from_evp_pkey(evp_pkey),
             )),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            EvpPkeyType::MlDsa44 | EvpPkeyType::MlDsa65 | EvpPkeyType::MlDsa87 => {
+                Ok(JsonWebKey::MlDsa(MlDsaJsonWebKey::from_evp_pkey(evp_pkey)))
+            }
             _ => Err(JoseError::InvalidKey("unsupported key type".into())),
         }
     }
@@ -283,6 +312,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.to_pem(level),
             JsonWebKey::OctetKeyPair(okp) => okp.to_pem(level),
             JsonWebKey::Rsa(rsa) => rsa.to_pem(level),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.to_pem(level),
             JsonWebKey::Oct(_) => Err(JoseError::InvalidKey(
                 "oct keys have no PEM representation".into(),
             )),
@@ -297,6 +328,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.evp_pkey().private_key_to_der().ok(),
             JsonWebKey::OctetKeyPair(okp) => okp.evp_pkey().private_key_to_der().ok(),
             JsonWebKey::Rsa(rsa) => rsa.evp_pkey().private_key_to_der().ok(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.evp_pkey().private_key_to_der().ok(),
             JsonWebKey::Oct(_) => None,
         }
     }
@@ -309,6 +342,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.evp_pkey().public_key_to_der().ok(),
             JsonWebKey::OctetKeyPair(okp) => okp.evp_pkey().public_key_to_der().ok(),
             JsonWebKey::Rsa(rsa) => rsa.evp_pkey().public_key_to_der().ok(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.evp_pkey().public_key_to_der().ok(),
             JsonWebKey::Oct(_) => None,
         }
     }
@@ -323,6 +358,8 @@ impl JsonWebKey {
             JsonWebKey::OctetKeyPair(okp) => Some(okp.to_der()),
             JsonWebKey::Oct(_) => None,
             JsonWebKey::Rsa(rsa) => Some(rsa.to_der()),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => Some(ml_dsa.to_der()),
         }
     }
 
@@ -352,6 +389,8 @@ impl JsonWebKey {
             JsonWebKey::OctetKeyPair(okp) => okp.to_json(level),
             JsonWebKey::Oct(oct) => oct.to_json(level),
             JsonWebKey::Rsa(rsa) => rsa.to_json(level),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.to_json(level),
         }
     }
 
@@ -362,6 +401,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.x5t(),
             JsonWebKey::OctetKeyPair(okp) => okp.x5t(),
             JsonWebKey::Rsa(rsa) => rsa.x5t(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.x5t(),
             JsonWebKey::Oct(_) => None,
         }
     }
@@ -373,6 +414,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.x5t_s256(),
             JsonWebKey::OctetKeyPair(okp) => okp.x5t_s256(),
             JsonWebKey::Rsa(rsa) => rsa.x5t_s256(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.x5t_s256(),
             JsonWebKey::Oct(_) => None,
         }
     }
@@ -386,6 +429,7 @@ impl JsonWebKey {
     /// - RSA: `e`, `kty`, `n`
     /// - OKP: `crv`, `kty`, `x`
     /// - oct: `k`, `kty`
+    /// - AKP: `alg`, `kty`, `pub`
     ///
     /// This is the key identity used by ACME `key-change` and External Account
     /// Binding. SHA-256 is the hash RFC 7638 registers and the one ACME uses.
@@ -426,6 +470,8 @@ impl JsonWebKey {
             JsonWebKey::Rsa(_) => &["e", "kty", "n"],
             JsonWebKey::OctetKeyPair(_) => &["crv", "kty", "x"],
             JsonWebKey::Oct(_) => &["k", "kty"],
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(_) => &["alg", "kty", "pub"],
         };
 
         canonical_jwk_json(&value, members, capacity)
@@ -437,6 +483,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.key_id(),
             JsonWebKey::OctetKeyPair(okp) => okp.key_id(),
             JsonWebKey::Rsa(rsa) => rsa.key_id(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.key_id(),
             JsonWebKey::Oct(oct) => oct.key_id(),
         }
     }
@@ -448,6 +496,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.set_key_id(key_id),
             JsonWebKey::OctetKeyPair(okp) => okp.set_key_id(key_id),
             JsonWebKey::Rsa(rsa) => rsa.set_key_id(key_id),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.set_key_id(key_id),
             JsonWebKey::Oct(oct) => oct.set_key_id(key_id),
         }
     }
@@ -458,6 +508,8 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.key_use(),
             JsonWebKey::OctetKeyPair(okp) => okp.key_use(),
             JsonWebKey::Rsa(rsa) => rsa.key_use(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.key_use(),
             JsonWebKey::Oct(oct) => oct.key_use(),
         }
     }
@@ -468,16 +520,21 @@ impl JsonWebKey {
             JsonWebKey::EllipticCurve(ec) => ec.alg(),
             JsonWebKey::OctetKeyPair(okp) => okp.alg(),
             JsonWebKey::Rsa(rsa) => rsa.alg(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.alg(),
             JsonWebKey::Oct(oct) => oct.alg(),
         }
     }
 
-    /// The JOSE curve name (`crv`) for EC and OKP keys; `None` for RSA and oct.
+    /// The JOSE curve name (`crv`) for EC and OKP keys, the ML-DSA parameter
+    /// set name for AKP keys, and `None` for RSA and oct.
     pub fn curve_name(&self) -> Option<&'static str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => Some(ec.curve_name()),
             JsonWebKey::OctetKeyPair(okp) => Some(okp.curve_name()),
             JsonWebKey::Rsa(_) | JsonWebKey::Oct(_) => None,
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.curve_name(),
         }
     }
 
@@ -489,13 +546,15 @@ impl JsonWebKey {
         }
     }
 
-    /// The JWK key type (`kty`): `"RSA"`, `"EC"`, `"OKP"`, or `"oct"`.
+    /// The JWK key type (`kty`): `"RSA"`, `"EC"`, `"OKP"`, `"AKP"`, or `"oct"`.
     pub fn key_type(&self) -> &'static str {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.key_type(),
             JsonWebKey::OctetKeyPair(okp) => okp.key_type(),
             JsonWebKey::Oct(oct) => oct.key_type(),
             JsonWebKey::Rsa(rsa) => rsa.key_type(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.key_type(),
         }
     }
 }
@@ -747,6 +806,23 @@ impl JsonWebKeyGenerator {
                 AlgorithmIdentifier::RsaPssUsingSha512 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(3072));
                     Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                }
+                // `alg` is one of the three `MlDsa*` variants matched here, so
+                // `ml_dsa_parameter_set_name()` always returns `Some(..)` with a
+                // name that `MlDsaParameterSet::from_jose_name` always accepts;
+                // neither `expect` can actually panic.
+                #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+                #[allow(clippy::missing_panics_doc)]
+                AlgorithmIdentifier::MlDsa44
+                | AlgorithmIdentifier::MlDsa65
+                | AlgorithmIdentifier::MlDsa87 => {
+                    let params_name = alg
+                        .ml_dsa_parameter_set_name()
+                        .expect("ML-DSA algorithm always pins a parameter set");
+                    let params = MlDsaParameterSet::from_jose_name(params_name)
+                        .expect("ML-DSA algorithm name is always a valid parameter set");
+                    let key = EvpPkey::generate_ml_dsa(params);
+                    Ok(JsonWebKey::MlDsa(MlDsaJsonWebKey::new(key)))
                 }
                 _ => Err(JoseError::InvalidAlgorithm(
                     "unsupported algorithm for key generation".into(),

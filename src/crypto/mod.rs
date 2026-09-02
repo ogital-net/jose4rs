@@ -10,6 +10,8 @@ mod ec;
 mod evp;
 pub(crate) mod hmac;
 pub(crate) mod mem;
+#[cfg(feature = "pq-ml-dsa")]
+pub(crate) mod ml_dsa;
 pub(crate) mod pbkdf2;
 pub(crate) mod rand;
 mod rsa;
@@ -26,5 +28,7 @@ pub(crate) use digest::digest;
 pub(crate) use ec::Curve as EcCurve;
 pub(crate) use ec::EcKey;
 pub(crate) use evp::{EvpPkey, EvpPkeyType};
+#[cfg(feature = "pq-ml-dsa")]
+pub(crate) use ml_dsa::MlDsaKey;
 pub(crate) use rsa::{Rsa, RsaPadding, RsaParam};
 pub(crate) use x509::X509Cert;
