@@ -82,6 +82,12 @@ impl std::fmt::Debug for JsonWebEncryption<'_> {
     }
 }
 
+impl Drop for JsonWebEncryption<'_> {
+    fn drop(&mut self) {
+        crate::crypto::mem::cleanse(&mut self.buffer);
+    }
+}
+
 impl<'a> JsonWebEncryption<'a> {
     /// Creates a new, empty JWE. Set the `alg` and `enc` headers, a payload,
     /// and a key, then call [`JsonWebEncryption::encrypt`]; or parse an
