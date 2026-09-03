@@ -69,6 +69,38 @@ impl<T: AsMut<[u8]>> Drop for Zeroizing<T> {
     }
 }
 
+pub(crate) struct ZeroizingVec(Vec<u8>);
+
+impl ZeroizingVec {
+    pub(crate) fn new(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
+impl Deref for ZeroizingVec {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ZeroizingVec {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for ZeroizingVec {
+    fn drop(&mut self) {
+        // SAFETY: `as_mut_ptr()` addresses an allocation of `capacity()` bytes.
+        // OPENSSL_cleanse writes each byte without requiring it to be initialized.
+        unsafe {
+            OPENSSL_cleanse(self.0.as_mut_ptr().cast(), self.0.capacity());
+        }
+    }
+}
+
 pub(crate) fn new_boxed_slice(len: usize) -> Box<[u8]> {
     debug_assert!(len > 0);
     unsafe {

@@ -23,7 +23,7 @@ use crate::{
     crypto::DigestAlgorithm,
     error::JoseError,
     jwa::{AlgorithmConstraints, BLOCK_NONE},
-    jwk::JsonWebKey,
+    jwk::{JsonWebKey, JwkAlgorithm},
     jwx::{HeaderParameter, JsonWebStructure},
 };
 
@@ -1143,8 +1143,8 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
     // RFC 7517 Section 4.4: a key with an `alg` member is intended only
     // for that algorithm. Reject same-family algorithm drift (e.g.
     // a key tagged HS256 verifying HS384).
-    if let Some(key_alg) = key.algorithm()
-        && key_alg != alg.name()
+    if let Some(key_alg) = key.jwk_algorithm()
+        && key_alg != &JwkAlgorithm::Jws(alg)
     {
         return Err(JoseError::InvalidKey(format!(
             "key is restricted to algorithm '{key_alg}' but the JWS uses '{alg}'"

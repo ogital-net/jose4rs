@@ -7,17 +7,16 @@ use crate::{
         mem::Zeroizing,
     },
     error::JoseError,
-    jws::AlgorithmIdentifier,
 };
 
-use super::{GetStr, OutputControlLevel};
+use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
 
 #[derive(Clone)]
 /// An RSA JSON Web Key (`kty: "RSA"`), holding public and optionally private
 /// key material.
 pub struct RsaJsonWebKey {
     evp_pkey: EvpPkey,
-    alg: Option<AlgorithmIdentifier>,
+    alg: Option<JwkAlgorithm>,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
     x5t: Option<String>,
@@ -41,7 +40,7 @@ impl std::fmt::Debug for RsaJsonWebKey {
 }
 
 impl RsaJsonWebKey {
-    pub(super) fn new(evp_pkey: EvpPkey, alg: Option<AlgorithmIdentifier>) -> Self {
+    pub(super) fn new(evp_pkey: EvpPkey, alg: Option<JwkAlgorithm>) -> Self {
         Self {
             evp_pkey,
             alg,
@@ -88,8 +87,13 @@ impl RsaJsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
-    pub fn alg(&self) -> Option<&'static str> {
-        self.alg.map(|a| a.name())
+    pub fn alg(&self) -> Option<&str> {
+        self.alg.as_ref().map(JwkAlgorithm::name)
+    }
+
+    /// The typed algorithm metadata designated for this key, if set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        self.alg.as_ref()
     }
 
     /// Serializes the key to DER (private PKCS#8 if private material is held,
@@ -244,7 +248,7 @@ impl RsaJsonWebKey {
             v.as_ref()
                 .map_or(0, |b| base64::url_encode_size(b.len_bytes()))
         };
-        let alg_len = self.alg.map_or(0, |a| 9 + a.name().len());
+        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
         // ,"x5t":"<27 chars>" and ,"x5t#S256":"<43 chars>"
         let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
         let x5t_s256_len = self.x5t_s256.as_ref().map_or(0, |v| 13 + v.len());
@@ -268,10 +272,9 @@ impl RsaJsonWebKey {
         );
 
         out.push_str("{\"kty\":\"RSA\"");
-        if let Some(alg) = self.alg {
-            out.push_str(",\"alg\":\"");
-            out.push_str(alg.name());
-            out.push('"');
+        if let Some(alg) = &self.alg {
+            out.push_str(",\"alg\":");
+            push_json_string(&mut out, alg.name());
         }
         if let Some(key_use) = self.key_use {
             out.push_str(",\"use\":\"");
@@ -432,18 +435,7 @@ impl RsaJsonWebKey {
             }
         }
 
-        let alg = match value.get("alg") {
-            Some(alg) => match alg {
-                "RS256" => Some(AlgorithmIdentifier::RsaUsingSha256),
-                "RS384" => Some(AlgorithmIdentifier::RsaUsingSha384),
-                "RS512" => Some(AlgorithmIdentifier::RsaUsingSha512),
-                "PS256" => Some(AlgorithmIdentifier::RsaPssUsingSha256),
-                "PS384" => Some(AlgorithmIdentifier::RsaPssUsingSha384),
-                "PS512" => Some(AlgorithmIdentifier::RsaPssUsingSha512),
-                _ => return Err(JoseError::InvalidAlgorithm(format!("invalid 'alg' {alg}"))),
-            },
-            None => None,
-        };
+        let alg = value.get("alg").map(str::parse).transpose()?;
 
         let mut jwk = Self::new(EvpPkey::from_rsa(rsa), alg);
         jwk.x5t = value.get("x5t").map(str::to_string);

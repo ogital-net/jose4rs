@@ -277,6 +277,19 @@ mod tests {
     }
 
     #[test]
+    fn retains_symmetric_keys_with_jwe_algorithm_metadata() {
+        let json = r#"{"keys":[{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256GCMKW","kid":"enc"}]}"#;
+        let set = JsonWebKeySet::from_json(json).unwrap();
+
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.keys()[0].algorithm(), Some("A256GCMKW"));
+        let serialized = set.to_json(super::super::OutputControlLevel::IncludeSymmetric);
+        let reparsed = JsonWebKeySet::from_json(serialized).unwrap();
+        assert_eq!(reparsed.len(), 1);
+        assert_eq!(reparsed.keys()[0].algorithm(), Some("A256GCMKW"));
+    }
+
+    #[test]
     fn test_missing_keys_member_is_error() {
         assert!(JsonWebKeySet::from_json(r#"{"notkeys":[]}"#).is_err());
         assert!(JsonWebKeySet::from_json("not json").is_err());

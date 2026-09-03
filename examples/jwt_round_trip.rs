@@ -3,7 +3,7 @@
 //! and consuming a signed JWT.
 //!
 //! Ported from jose4j's `ExamplesTest.jwtRoundTripExample`. Note that the
-//! jose4rs `JwtConsumer` validates claims JSON only — JWS signature
+//! jose4rs `JwtConsumer` validates claims JSON only -- JWS signature
 //! verification is performed with `JsonWebSignature` first (the jose4j
 //! consumer does both in one shot).
 

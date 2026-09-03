@@ -5,7 +5,7 @@ use crate::{
     crypto::{DigestAlgorithm, aead, aes, mem, pbkdf2, rand::rand_bytes},
     error::JoseError,
     jwe::{ContentEncryptionAlgorithm, ContentEncryptionKeys, kdf},
-    jwk::JsonWebKey,
+    jwk::{JsonWebKey, JwkAlgorithm},
     jwx::HeaderParameter,
 };
 use simd_json::derived::{MutableObject, ValueObjectAccess, ValueObjectAccessAsScalar as _};
@@ -120,6 +120,7 @@ impl KeyManagementAlgorithm {
         cek: &[u8],
         headers: &mut simd_json::owned::Value,
     ) -> Result<ContentEncryptionKeys, JoseError> {
+        self.validate_key_algorithm(management_key, content_enc_alg)?;
         match self {
             KeyManagementAlgorithm::Rsa15 => {
                 let encrypted_key = match management_key {
@@ -206,9 +207,11 @@ impl KeyManagementAlgorithm {
     pub(super) fn manage_decrypt(
         &self,
         management_key: &JsonWebKey,
+        content_enc_alg: &ContentEncryptionAlgorithm,
         encrypted_key: &[u8],
         headers: &simd_json::owned::Value,
     ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
+        self.validate_key_algorithm(management_key, content_enc_alg)?;
         match self {
             KeyManagementAlgorithm::Rsa15 => match management_key {
                 JsonWebKey::Rsa(rsa_key) => rsa_key
@@ -543,6 +546,36 @@ impl KeyManagementAlgorithm {
                 Ok(mem::Zeroizing::new(Box::from(key_bytes)))
             }
         }
+    }
+
+    fn validate_key_algorithm(
+        &self,
+        management_key: &JsonWebKey,
+        content_enc_alg: &ContentEncryptionAlgorithm,
+    ) -> Result<(), JoseError> {
+        let matches = match management_key.jwk_algorithm() {
+            None => true,
+            Some(JwkAlgorithm::Jwe(algorithm)) => algorithm == self,
+            Some(JwkAlgorithm::ContentEncryption(algorithm)) => {
+                *self == Self::Direct && algorithm == content_enc_alg
+            }
+            Some(JwkAlgorithm::Jws(_) | JwkAlgorithm::Custom(_)) => false,
+        };
+        if matches {
+            return Ok(());
+        }
+
+        let key_algorithm = management_key
+            .algorithm()
+            .expect("a failed metadata match requires a JWK algorithm");
+        let required = if *self == Self::Direct {
+            format!("'{}' or '{}'", self.name(), content_enc_alg.name())
+        } else {
+            format!("'{}'", self.name())
+        };
+        Err(JoseError::InvalidKey(format!(
+            "key is restricted to algorithm '{key_algorithm}' but the JWE requires {required}"
+        )))
     }
 
     /// Maximum accepted PBES2 iteration count, mirroring jose4j's limit to
@@ -885,7 +918,12 @@ mod tests {
         let headers = simd_json::to_owned_value(&mut header_bytes).unwrap();
 
         let cek = KeyManagementAlgorithm::EcdhEs
-            .manage_decrypt(&receiver, &[], &headers)
+            .manage_decrypt(
+                &receiver,
+                &ContentEncryptionAlgorithm::Aes128Gcm,
+                &[],
+                &headers,
+            )
             .unwrap();
 
         let expected = base64::url_decode("VqqN6vgjbSBcIijNcacQGg").unwrap();
@@ -913,7 +951,12 @@ mod tests {
         let headers = simd_json::to_owned_value(&mut header_bytes).unwrap();
 
         // A non-empty encrypted key must be rejected.
-        let result = KeyManagementAlgorithm::EcdhEs.manage_decrypt(&receiver, &[1, 2, 3], &headers);
+        let result = KeyManagementAlgorithm::EcdhEs.manage_decrypt(
+            &receiver,
+            &ContentEncryptionAlgorithm::Aes128Gcm,
+            &[1, 2, 3],
+            &headers,
+        );
         assert!(
             result.is_err(),
             "expected rejection of non-empty encrypted key"

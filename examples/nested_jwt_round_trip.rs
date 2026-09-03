@@ -1,6 +1,6 @@
 //! A nested JWT round trip: a JWS (signed claims) nested inside a JWE.
 //!
-//! Ported from jose4j's `ExamplesTest.nestedJwtRoundTripExample` — EC keys,
+//! Ported from jose4j's `ExamplesTest.nestedJwtRoundTripExample` -- EC keys,
 //! ES256 signature, `ECDH-ES+A128KW` key management, `AES_128_CBC_HMAC_SHA_256`
 //! content encryption.
 

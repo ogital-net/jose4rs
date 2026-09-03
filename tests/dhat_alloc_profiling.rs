@@ -59,14 +59,14 @@ fn print_stats(label: &str, stats: &dhat::HeapStats) {
 }
 
 // ---------------------------------------------------------------------------
-// JWS – HMAC-SHA256 sign + verify round-trip
+// JWS -- HMAC-SHA256 sign + verify round-trip
 // ---------------------------------------------------------------------------
 
 #[test]
 fn profile_jws_hs256_sign_verify() {
     let (_lock, _profiler) = testing_profiler();
 
-    // Key generation is setup cost – measure it, but don't count it against
+    // Key generation is setup cost -- measure it, but don't count it against
     // the sign/verify budget.
     let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
         .generate()
@@ -92,7 +92,7 @@ fn profile_jws_hs256_sign_verify() {
 }
 
 // ---------------------------------------------------------------------------
-// JWS – Ed25519 verify (RFC 8037 test vector)
+// JWS -- Ed25519 verify (RFC 8037 test vector)
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -119,7 +119,7 @@ fn profile_jws_ed25519_verify() {
 }
 
 // ---------------------------------------------------------------------------
-// JWS – RS256 verify
+// JWS -- RS256 verify
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -156,7 +156,7 @@ fn profile_jws_rs256_verify() {
 }
 
 // ---------------------------------------------------------------------------
-// JWE – direct + AES-128-GCM decrypt
+// JWE -- direct + AES-128-GCM decrypt
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -176,7 +176,7 @@ fn profile_jwe_direct_aes128gcm_decrypt() {
 }
 
 // ---------------------------------------------------------------------------
-// JWE – A128KW + AES-128-GCM decrypt
+// JWE -- A128KW + AES-128-GCM decrypt
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -196,7 +196,7 @@ fn profile_jwe_a128kw_aes128gcm_decrypt() {
 }
 
 // ---------------------------------------------------------------------------
-// JWT – claims parse + validate
+// JWT -- claims parse + validate
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -241,7 +241,7 @@ fn profile_jwt_claims_parse_and_validate() {
 }
 
 // ---------------------------------------------------------------------------
-// JWT – breakdown of allocation sources
+// JWT -- breakdown of allocation sources
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -379,7 +379,7 @@ fn profile_jwt_to_json() {
 }
 
 // ---------------------------------------------------------------------------
-// Full JWT round-trip: sign → verify → validate
+// Full JWT round-trip: sign -> verify -> validate
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -445,7 +445,7 @@ fn print_delta(label: &str, before: &dhat::HeapStats, after: &dhat::HeapStats) {
 }
 
 // ---------------------------------------------------------------------------
-// JWS parse (set_compact_serialization) – step by step
+// JWS parse (set_compact_serialization) -- step by step
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -497,7 +497,7 @@ fn audit_jws_parse_steps() {
 }
 
 // ---------------------------------------------------------------------------
-// JWS sign (compact_serialization) – step by step
+// JWS sign (compact_serialization) -- step by step
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -535,7 +535,7 @@ fn audit_jws_sign_steps() {
 }
 
 // ---------------------------------------------------------------------------
-// JWE parse + decrypt – step by step
+// JWE parse + decrypt -- step by step
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -578,7 +578,7 @@ fn audit_jwe_parse_decrypt_steps() {
 }
 
 // ---------------------------------------------------------------------------
-// JWE A128KW parse + decrypt – step by step
+// JWE A128KW parse + decrypt -- step by step
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -613,7 +613,7 @@ fn audit_jwe_keywrap_parse_decrypt_steps() {
 }
 
 // ---------------------------------------------------------------------------
-// JWE encrypt + serialize – step by step
+// JWE encrypt + serialize -- step by step
 // ---------------------------------------------------------------------------
 
 #[test]

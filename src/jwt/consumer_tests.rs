@@ -747,7 +747,7 @@ mod jwt_consumer_tests {
     }
 
     /// A custom validator's failure coexists with a built-in validator's
-    /// failure in the same `InvalidJwtError` — the codes are accumulated,
+    /// failure in the same `InvalidJwtError` -- the codes are accumulated,
     /// not short-circuited.
     #[test]
     fn register_validator_accumulates_with_default_failures() {

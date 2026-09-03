@@ -4,17 +4,16 @@ use crate::{
     base64,
     crypto::{EvpPkey, EvpPkeyType, X509Cert, mem::Zeroizing},
     error::JoseError,
-    jws::AlgorithmIdentifier,
 };
 
-use super::{GetStr, OkpCurve, OutputControlLevel};
+use super::{GetStr, JwkAlgorithm, OkpCurve, OutputControlLevel, push_json_string};
 
 #[derive(Clone)]
 /// An octet key pair JSON Web Key (`kty: "OKP"`), holding an Ed25519 or
 /// X25519 public key and optionally its private counterpart (RFC 8037).
 pub struct OkpJsonWebKey {
     evp_pkey: EvpPkey,
-    alg: Option<AlgorithmIdentifier>,
+    alg: Option<JwkAlgorithm>,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
     x5t: Option<String>,
@@ -38,7 +37,7 @@ impl std::fmt::Debug for OkpJsonWebKey {
 impl OkpJsonWebKey {
     const RAW_KEY_LEN: usize = 32;
 
-    pub(crate) fn new(evp_pkey: EvpPkey, alg: Option<AlgorithmIdentifier>) -> Self {
+    pub(crate) fn new(evp_pkey: EvpPkey, alg: Option<JwkAlgorithm>) -> Self {
         Self {
             evp_pkey,
             alg,
@@ -137,8 +136,13 @@ impl OkpJsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
-    pub fn alg(&self) -> Option<&'static str> {
-        self.alg.map(|a| a.name())
+    pub fn alg(&self) -> Option<&str> {
+        self.alg.as_ref().map(JwkAlgorithm::name)
+    }
+
+    /// The typed algorithm metadata designated for this key, if set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        self.alg.as_ref()
     }
 
     /// The OKP curve.
@@ -315,7 +319,7 @@ impl OkpJsonWebKey {
 
         // {"kty":"OKP","crv":"<crv>"} plus optional ,"alg":"<alg>",
         // ,"x5t":"<tp>", ,"x5t#S256":"<tp>", ,"x":"<b64>" and ,"d":"<b64>"
-        let alg_len = self.alg.map_or(0, |a| 9 + a.name().len());
+        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
         let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
         let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
         let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
@@ -333,10 +337,9 @@ impl OkpJsonWebKey {
         out.push_str("{\"kty\":\"OKP\",\"crv\":\"");
         out.push_str(crv);
         out.push('"');
-        if let Some(alg) = self.alg {
-            out.push_str(",\"alg\":\"");
-            out.push_str(alg.name());
-            out.push('"');
+        if let Some(alg) = &self.alg {
+            out.push_str(",\"alg\":");
+            push_json_string(&mut out, alg.name());
         }
         if let Some(key_use) = self.key_use {
             out.push_str(",\"use\":\"");
@@ -410,13 +413,7 @@ impl OkpJsonWebKey {
 
         let d = value.get("d").map(base64::url_decode).transpose()?;
 
-        let alg = match value.get("alg") {
-            Some(alg) => match alg {
-                "EdDSA" => Some(AlgorithmIdentifier::EdDsa),
-                _ => return Err(JoseError::InvalidAlgorithm(format!("invalid 'alg' {alg}"))),
-            },
-            None => None,
-        };
+        let alg = value.get("alg").map(str::parse).transpose()?;
 
         let curve = match value.get("crv") {
             Some("Ed25519") => Ok(OkpCurve::Ed25519),
@@ -605,8 +602,10 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_alg() {
+    fn preserves_algorithm_metadata_for_operation_time_validation() {
         let json = r#"{"kty":"OKP","crv":"Ed25519","alg":"HS256","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
-        assert!(parse(json).is_err());
+        let key = parse(json).unwrap();
+
+        assert_eq!(key.algorithm(), Some("HS256"));
     }
 }

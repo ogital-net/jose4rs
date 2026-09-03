@@ -91,10 +91,9 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
 fn bench_jwe_rsa_oaep(c: &mut Criterion) {
     use jose4rs::jwe::{ContentEncryptionAlgorithm, JsonWebEncryption, KeyManagementAlgorithm};
     use jose4rs::jwk::{JsonWebKeyGenerator, OutputControlLevel};
-    use jose4rs::jws::AlgorithmIdentifier;
     use jose4rs::jwx::JsonWebStructure;
 
-    let jose4rs_key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::RsaUsingSha256)
+    let jose4rs_key = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::RsaOaep)
         .generate()
         .unwrap();
     let pub_pem = jose4rs_key.to_pem(OutputControlLevel::PublicOnly).unwrap();

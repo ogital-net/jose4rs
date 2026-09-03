@@ -18,8 +18,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     base64,
-    crypto::{EvpPkey, MlDsaKey},
+    crypto::{EvpPkey, EvpPkeyType, MlDsaKey},
     error::JoseError,
+    jws::AlgorithmIdentifier,
 };
 
 /// The ML-DSA parameter sets defined by FIPS 204, in ascending strength order.
@@ -98,13 +99,14 @@ impl MlDsaParameterSet {
     }
 }
 
-use super::{GetStr, OutputControlLevel};
+use super::{GetStr, JwkAlgorithm, OutputControlLevel};
 
 /// An AKP JSON Web Key (`kty: "AKP"`), holding an ML-DSA public key and,
 /// optionally, the 32-byte seed form of its private key (RFC 9964 Section 4).
 #[derive(Clone)]
 pub struct MlDsaJsonWebKey {
     evp_pkey: EvpPkey,
+    alg: JwkAlgorithm,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
     x5t: Option<String>,
@@ -125,8 +127,15 @@ impl std::fmt::Debug for MlDsaJsonWebKey {
 
 impl MlDsaJsonWebKey {
     pub(crate) fn new(evp_pkey: EvpPkey) -> Self {
+        let algorithm = match evp_pkey.key_type() {
+            EvpPkeyType::MlDsa44 => AlgorithmIdentifier::MlDsa44,
+            EvpPkeyType::MlDsa65 => AlgorithmIdentifier::MlDsa65,
+            EvpPkeyType::MlDsa87 => AlgorithmIdentifier::MlDsa87,
+            _ => unreachable!("MlDsaJsonWebKey must contain an ML-DSA key"),
+        };
         Self {
             evp_pkey,
+            alg: algorithm.into(),
             key_use: None,
             key_id: None,
             x5t: None,
@@ -179,13 +188,7 @@ impl MlDsaJsonWebKey {
     /// from PEM/DER; it is **not** the form required by the JWK `priv`
     /// member, which is always the 32-byte seed per RFC 9964 Section 4. Use
     pub(super) fn from_evp_pkey(evp_pkey: EvpPkey) -> Self {
-        Self {
-            evp_pkey,
-            key_use: None,
-            key_id: None,
-            x5t: None,
-            x5t_s256: None,
-        }
+        Self::new(evp_pkey)
     }
 
     /// The ML-DSA parameter set for this key, inferred from the FIPS 204
@@ -281,8 +284,13 @@ impl MlDsaJsonWebKey {
     }
 
     /// The algorithm (`alg`) fixed by this key's ML-DSA parameter set.
-    pub fn alg(&self) -> Option<&'static str> {
-        Some(self.parameter_set().jose_name())
+    pub fn alg(&self) -> Option<&str> {
+        Some(self.alg.name())
+    }
+
+    /// The typed algorithm metadata fixed by this key's ML-DSA parameter set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        Some(&self.alg)
     }
 
     /// Serializes the key to PEM (PKCS#8 if private material is held,
@@ -316,7 +324,7 @@ impl MlDsaJsonWebKey {
 
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     pub fn to_json(&self, level: OutputControlLevel) -> String {
-        let alg = self.parameter_set().jose_name();
+        let alg = self.alg.name();
         let alg_len = 9 + alg.len();
         let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
         let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());

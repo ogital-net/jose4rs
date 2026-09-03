@@ -6,17 +6,16 @@ use crate::{
         BigNum, DigestAlgorithm, EcCurve, EcKey, EvpPkey, EvpPkeyType, X509Cert, mem::Zeroizing,
     },
     error::JoseError,
-    jws::AlgorithmIdentifier,
 };
 
-use super::{GetStr, OutputControlLevel};
+use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
 
 #[derive(Clone)]
 /// An elliptic-curve JSON Web Key (`kty: "EC"`), holding public and optionally
 /// private key material on a named NIST curve.
 pub struct EcJsonWebKey {
     evp_pkey: EvpPkey,
-    alg: Option<AlgorithmIdentifier>,
+    alg: Option<JwkAlgorithm>,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
     x5t: Option<String>,
@@ -40,7 +39,7 @@ impl std::fmt::Debug for EcJsonWebKey {
 }
 
 impl EcJsonWebKey {
-    pub(crate) fn new(evp_pkey: EvpPkey, alg: Option<AlgorithmIdentifier>) -> Self {
+    pub(crate) fn new(evp_pkey: EvpPkey, alg: Option<JwkAlgorithm>) -> Self {
         Self {
             evp_pkey,
             alg,
@@ -83,8 +82,13 @@ impl EcJsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
-    pub fn alg(&self) -> Option<&'static str> {
-        self.alg.map(|a| a.name())
+    pub fn alg(&self) -> Option<&str> {
+        self.alg.as_ref().map(JwkAlgorithm::name)
+    }
+
+    /// The typed algorithm metadata designated for this key, if set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        self.alg.as_ref()
     }
 
     /// Serializes the key to DER (private PKCS#8 if private material is held,
@@ -229,7 +233,7 @@ impl EcJsonWebKey {
         // {"kty":"EC","crv":"<crv>","x":"<b64>","y":"<b64>"} plus optional
         // ,"alg":"<alg>", ,"use":"<use>", ,"kid":"<id>", ,"x5t":"<tp>",
         // ,"x5t#S256":"<tp>" and ,"d":"<b64>"
-        let alg_len = self.alg.map_or(0, |a| 9 + a.name().len());
+        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
         let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
         let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
         let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
@@ -249,10 +253,9 @@ impl EcJsonWebKey {
         out.push_str("{\"kty\":\"EC\",\"crv\":\"");
         out.push_str(curve.jose_name());
         out.push('"');
-        if let Some(alg) = self.alg {
-            out.push_str(",\"alg\":\"");
-            out.push_str(alg.name());
-            out.push('"');
+        if let Some(alg) = &self.alg {
+            out.push_str(",\"alg\":");
+            push_json_string(&mut out, alg.name());
         }
         if let Some(key_use) = self.key_use {
             out.push_str(",\"use\":\"");
@@ -368,17 +371,7 @@ impl EcJsonWebKey {
         }
         ec_key.check_key()?;
 
-        let alg = match value.get("alg") {
-            Some(alg) => match alg {
-                "ES256" => Some(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256),
-                "ES384" => Some(AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384),
-                "ES512" => Some(AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512),
-                #[cfg(not(feature = "boring"))]
-                "ES256K" => Some(AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256),
-                _ => return Err(JoseError::InvalidAlgorithm(format!("invalid 'alg' {alg}"))),
-            },
-            None => None,
-        };
+        let alg = value.get("alg").map(str::parse).transpose()?;
 
         let mut jwk = Self::new(EvpPkey::from_ec_key(ec_key), alg);
         jwk.x5t = value.get("x5t").map(str::to_string);

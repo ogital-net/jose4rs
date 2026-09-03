@@ -9,7 +9,7 @@ use simd_json::derived::ValueObjectAccessAsScalar as _;
 use crate::{
     crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, rand::rand_bytes},
     error::JoseError,
-    jwe::KeyManagementAlgorithm,
+    jwe::{ContentEncryptionAlgorithm, KeyManagementAlgorithm},
     jws::AlgorithmIdentifier,
 };
 
@@ -42,6 +42,81 @@ pub use https::{
 pub use https_async::{AsyncHttpsJwks, AsyncJwksFetcher, FetchFuture};
 pub use selector::{DecryptionJwkSelector, VerificationJwkSelector};
 pub use set::JsonWebKeySet;
+
+/// An algorithm named by a JWK `alg` parameter.
+///
+/// Known algorithms retain their typed representation. Other ASCII names are
+/// preserved so newly registered and collision-resistant algorithm names can
+/// round-trip without requiring a jose4rs release first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JwkAlgorithm {
+    /// A JWS signature or MAC algorithm.
+    Jws(AlgorithmIdentifier),
+    /// A JWE key-management algorithm.
+    Jwe(KeyManagementAlgorithm),
+    /// A JWE content-encryption algorithm, used by direct symmetric keys.
+    ContentEncryption(ContentEncryptionAlgorithm),
+    /// An algorithm not currently known to jose4rs.
+    Custom(Box<str>),
+}
+
+impl JwkAlgorithm {
+    /// Returns the JOSE algorithm name.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Jws(algorithm) => algorithm.name(),
+            Self::Jwe(algorithm) => algorithm.name(),
+            Self::ContentEncryption(algorithm) => algorithm.name(),
+            Self::Custom(algorithm) => algorithm,
+        }
+    }
+}
+
+impl std::str::FromStr for JwkAlgorithm {
+    type Err = JoseError;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        if name.is_empty() || !name.is_ascii() {
+            return Err(JoseError::InvalidKey(
+                "JWK 'alg' must be a non-empty ASCII string".into(),
+            ));
+        }
+        if let Ok(algorithm) = name.parse::<AlgorithmIdentifier>() {
+            return Ok(Self::Jws(algorithm));
+        }
+        if let Ok(algorithm) = name.parse::<KeyManagementAlgorithm>() {
+            return Ok(Self::Jwe(algorithm));
+        }
+        if let Ok(algorithm) = name.parse::<ContentEncryptionAlgorithm>() {
+            return Ok(Self::ContentEncryption(algorithm));
+        }
+        Ok(Self::Custom(name.into()))
+    }
+}
+
+impl std::fmt::Display for JwkAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl From<AlgorithmIdentifier> for JwkAlgorithm {
+    fn from(algorithm: AlgorithmIdentifier) -> Self {
+        Self::Jws(algorithm)
+    }
+}
+
+impl From<KeyManagementAlgorithm> for JwkAlgorithm {
+    fn from(algorithm: KeyManagementAlgorithm) -> Self {
+        Self::Jwe(algorithm)
+    }
+}
+
+impl From<ContentEncryptionAlgorithm> for JwkAlgorithm {
+    fn from(algorithm: ContentEncryptionAlgorithm) -> Self {
+        Self::ContentEncryption(algorithm)
+    }
+}
 
 /// The intended use of a JWK (the `use` parameter, RFC 7517 Section 4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +256,31 @@ impl GetStr for &simd_json::OwnedValue {
     fn get(&self, key: &str) -> Option<&str> {
         self.get_str(key)
     }
+}
+
+pub(super) fn push_json_string(out: &mut String, value: &str) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+
+    out.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{00}'..='\u{1f}' => {
+                let byte = character as usize;
+                out.push_str("\\u00");
+                out.push(HEX[byte >> 4] as char);
+                out.push(HEX[byte & 0x0f] as char);
+            }
+            _ => out.push(character),
+        }
+    }
+    out.push('"');
 }
 
 impl JsonWebKey {
@@ -515,7 +615,7 @@ impl JsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
-    pub fn algorithm(&self) -> Option<&'static str> {
+    pub fn algorithm(&self) -> Option<&str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.alg(),
             JsonWebKey::OctetKeyPair(okp) => okp.alg(),
@@ -523,6 +623,18 @@ impl JsonWebKey {
             #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
             JsonWebKey::MlDsa(ml_dsa) => ml_dsa.alg(),
             JsonWebKey::Oct(oct) => oct.alg(),
+        }
+    }
+
+    /// The typed algorithm metadata designated for this key, if set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        match self {
+            JsonWebKey::EllipticCurve(ec) => ec.jwk_algorithm(),
+            JsonWebKey::OctetKeyPair(okp) => okp.jwk_algorithm(),
+            JsonWebKey::Rsa(rsa) => rsa.jwk_algorithm(),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(ml_dsa) => ml_dsa.jwk_algorithm(),
+            JsonWebKey::Oct(oct) => oct.jwk_algorithm(),
         }
     }
 
@@ -621,7 +733,8 @@ pub struct JsonWebKeyGenerator {
 
 impl JsonWebKeyGenerator {
     /// Creates a generator for a key suitable for the given JWE key management
-    /// algorithm (`alg`).
+    /// algorithm (`alg`). The generated JWK is restricted to this algorithm in
+    /// its `alg` metadata.
     pub fn for_encryption(alg: KeyManagementAlgorithm) -> Self {
         JsonWebKeyGenerator {
             key_mgmt_alg: Some(alg),
@@ -631,7 +744,8 @@ impl JsonWebKeyGenerator {
         }
     }
     /// Creates a generator for a key suitable for the given JWS signature
-    /// algorithm (`alg`).
+    /// algorithm (`alg`). The generated JWK is restricted to this algorithm in
+    /// its `alg` metadata.
     pub fn for_signature(alg: AlgorithmIdentifier) -> Self {
         JsonWebKeyGenerator {
             key_mgmt_alg: None,
@@ -679,7 +793,7 @@ impl JsonWebKeyGenerator {
                 | KeyManagementAlgorithm::RsaOaep384
                 | KeyManagementAlgorithm::RsaOaep512 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(2048));
-                    let mut jwk = RsaJsonWebKey::new(key, None);
+                    let mut jwk = RsaJsonWebKey::new(key, Some(alg.into()));
                     jwk.set_key_use(KeyUse::Encryption);
                     Ok(JsonWebKey::Rsa(jwk))
                 }
@@ -689,42 +803,66 @@ impl JsonWebKeyGenerator {
                 | KeyManagementAlgorithm::EcdhEsA256Kw => match self.okp_curve {
                     Some(OkpCurve::X25519) => {
                         let key = EvpPkey::generate_x25519();
-                        Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::new(key, None)))
+                        Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::new(
+                            key,
+                            Some(alg.into()),
+                        )))
                     }
                     Some(OkpCurve::Ed25519) => {
                         // Ed25519 is a signature curve and cannot do ECDH key
                         // agreement; fall through to the EC default below.
                         let key = EvpPkey::generate_ec(EcCurve::P256);
-                        Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, None)))
+                        Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                            key,
+                            Some(alg.into()),
+                        )))
                     }
                     None => {
                         // Default to the widely-supported P-256 curve for ECDH.
                         let key = EvpPkey::generate_ec(EcCurve::P256);
-                        Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, None)))
+                        Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                            key,
+                            Some(alg.into()),
+                        )))
                     }
                 },
                 KeyManagementAlgorithm::A128Kw | KeyManagementAlgorithm::A128GcmKw => {
                     let key = rand_bytes(symmetric_key_bytes(128));
-                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(key, None)))
+                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 KeyManagementAlgorithm::A192Kw | KeyManagementAlgorithm::A192GcmKw => {
                     let key = rand_bytes(symmetric_key_bytes(192));
-                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(key, None)))
+                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 KeyManagementAlgorithm::A256Kw | KeyManagementAlgorithm::A256GcmKw => {
                     let key = rand_bytes(symmetric_key_bytes(256));
-                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(key, None)))
+                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 KeyManagementAlgorithm::Pbes2Hs256A128Kw
                 | KeyManagementAlgorithm::Pbes2Hs384A192Kw
                 | KeyManagementAlgorithm::Pbes2Hs512A256Kw => {
                     // PBES2 uses a password; default to 256 bits of entropy.
                     let key = rand_bytes(symmetric_key_bytes(256));
-                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(key, None)))
+                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 KeyManagementAlgorithm::Direct => {
                     let key = rand_bytes(symmetric_key_bytes(256));
-                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(key, None)))
+                    Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
             }
         } else if let Some(alg) = self.sig_alg {
@@ -737,7 +875,7 @@ impl JsonWebKeyGenerator {
                     let key = rand_bytes(key_bytes);
                     Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
                         key,
-                        Some(alg),
+                        Some(alg.into()),
                     )))
                 }
                 AlgorithmIdentifier::HmacSha384 => {
@@ -748,7 +886,7 @@ impl JsonWebKeyGenerator {
                     let key = rand_bytes(key_bytes);
                     Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
                         key,
-                        Some(alg),
+                        Some(alg.into()),
                     )))
                 }
                 AlgorithmIdentifier::HmacSha512 => {
@@ -759,53 +897,68 @@ impl JsonWebKeyGenerator {
                     let key = rand_bytes(key_bytes);
                     Ok(JsonWebKey::Oct(OctetSequenceJsonWebKey::new(
                         key,
-                        Some(alg),
+                        Some(alg.into()),
                     )))
                 }
                 AlgorithmIdentifier::RsaUsingSha256 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(2048));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 AlgorithmIdentifier::RsaUsingSha384 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(2048));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 AlgorithmIdentifier::RsaUsingSha512 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(3072));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256 => {
                     let key = EvpPkey::generate_ec(EcCurve::P256);
-                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384 => {
                     let key = EvpPkey::generate_ec(EcCurve::P384);
-                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512 => {
                     let key = EvpPkey::generate_ec(EcCurve::P521);
-                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 #[cfg(not(feature = "boring"))]
                 AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => {
                     let key = EvpPkey::generate_ec(EcCurve::Secp256k1);
-                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 AlgorithmIdentifier::EdDsa => {
                     let key = EvpPkey::generate_ed25519();
-                    Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::new(
+                        key,
+                        Some(alg.into()),
+                    )))
                 }
                 AlgorithmIdentifier::RsaPssUsingSha256 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(2048));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 AlgorithmIdentifier::RsaPssUsingSha384 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(2048));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 AlgorithmIdentifier::RsaPssUsingSha512 => {
                     let key = EvpPkey::generate_rsa(self.key_bits.unwrap_or(3072));
-                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg))))
+                    Ok(JsonWebKey::Rsa(RsaJsonWebKey::new(key, Some(alg.into()))))
                 }
                 // `alg` is one of the three `MlDsa*` variants matched here, so
                 // `ml_dsa_parameter_set_name()` always returns `Some(..)` with a
@@ -1016,6 +1169,7 @@ mod tests {
         ] {
             let key = JsonWebKeyGenerator::for_encryption(alg).generate().unwrap();
             assert_eq!(key.key_type(), "EC");
+            assert_eq!(key.algorithm(), Some(alg.name()));
         }
     }
 
@@ -1036,6 +1190,7 @@ mod tests {
             let key = JsonWebKeyGenerator::for_encryption(alg).generate().unwrap();
             assert_eq!(key.key_type(), "oct");
             assert_eq!(key.key_bytes().unwrap().len(), expected_bytes);
+            assert_eq!(key.algorithm(), Some(alg.name()));
         }
     }
 

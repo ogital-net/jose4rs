@@ -7,17 +7,16 @@ use crate::{
         mem::{Zeroizing, crypto_memcmp},
     },
     error::JoseError,
-    jws::AlgorithmIdentifier,
 };
 
-use super::GetStr;
+use super::{GetStr, JwkAlgorithm, push_json_string};
 
 #[derive(Clone)]
 /// A symmetric (shared-secret) JSON Web Key (`kty: "oct"`), used for HMAC
 /// signatures and symmetric JWE key management / direct encryption.
 pub struct OctetSequenceJsonWebKey {
     oct_key: Zeroizing<Box<[u8]>>,
-    alg: Option<AlgorithmIdentifier>,
+    alg: Option<JwkAlgorithm>,
     key_use: Option<super::KeyUse>,
     key_id: Option<String>,
 }
@@ -36,7 +35,7 @@ impl std::fmt::Debug for OctetSequenceJsonWebKey {
 }
 
 impl OctetSequenceJsonWebKey {
-    pub(super) fn new(oct_key: Box<[u8]>, alg: Option<AlgorithmIdentifier>) -> Self {
+    pub(super) fn new(oct_key: Box<[u8]>, alg: Option<JwkAlgorithm>) -> Self {
         Self {
             oct_key: Zeroizing::new(oct_key),
             alg,
@@ -73,8 +72,13 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
-    pub fn alg(&self) -> Option<&'static str> {
-        self.alg.map(|a| a.name())
+    pub fn alg(&self) -> Option<&str> {
+        self.alg.as_ref().map(JwkAlgorithm::name)
+    }
+
+    /// The typed algorithm metadata designated for this key, if set.
+    pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
+        self.alg.as_ref()
     }
 
     /// Serializes the key to its JWK JSON form, honoring the given output level.
@@ -87,7 +91,7 @@ impl OctetSequenceJsonWebKey {
 
         // {"kty":"oct"} plus optional ,"alg":"<alg>", ,"use":"<use>",
         // ,"kid":"<id>" and ,"k":"<b64>"
-        let alg_len = self.alg.map_or(0, |a| 9 + a.name().len());
+        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
         let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
         let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
         let k_len = match level {
@@ -99,10 +103,9 @@ impl OctetSequenceJsonWebKey {
         let mut out = String::with_capacity(13 + alg_len + use_len + kid_len + k_len);
 
         out.push_str("{\"kty\":\"oct\"");
-        if let Some(alg) = self.alg {
-            out.push_str(",\"alg\":\"");
-            out.push_str(alg.name());
-            out.push('"');
+        if let Some(alg) = &self.alg {
+            out.push_str(",\"alg\":");
+            push_json_string(&mut out, alg.name());
         }
         if let Some(key_use) = self.key_use {
             out.push_str(",\"use\":\"");
@@ -169,15 +172,7 @@ impl OctetSequenceJsonWebKey {
     }
 
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let alg = match value.get("alg") {
-            Some(alg) => match alg {
-                "HS256" => Some(AlgorithmIdentifier::HmacSha256),
-                "HS384" => Some(AlgorithmIdentifier::HmacSha384),
-                "HS512" => Some(AlgorithmIdentifier::HmacSha512),
-                _ => return Err(JoseError::InvalidKey(format!("invalid 'alg' {alg}"))),
-            },
-            None => None,
-        };
+        let alg = value.get("alg").map(str::parse).transpose()?;
 
         let k = match value.get("k") {
             Some(k) => base64::url_decode(k)?,
@@ -212,5 +207,75 @@ mod tests {
         assert_eq!(key.alg(), None);
         assert_eq!(key.key_use(), None);
         assert_eq!(key.key_id(), None);
+    }
+
+    #[test]
+    fn parses_and_round_trips_jwe_algorithm_metadata() {
+        let jwk = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+            ("kty".into(), "oct".into()),
+            (
+                "k".into(),
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            ),
+            ("alg".into(), "A256GCMKW".into()),
+        ]))
+        .unwrap();
+
+        assert_eq!(jwk.alg(), Some("A256GCMKW"));
+        assert_eq!(
+            jwk.jwk_algorithm(),
+            Some(&JwkAlgorithm::Jwe(
+                crate::jwe::KeyManagementAlgorithm::A256GcmKw
+            ))
+        );
+        assert!(
+            jwk.to_json(super::super::OutputControlLevel::IncludeSymmetric)
+                .contains("\"alg\":\"A256GCMKW\"")
+        );
+    }
+
+    #[test]
+    fn parses_content_encryption_and_custom_algorithm_metadata() {
+        let content_encryption = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+            (
+                "k".into(),
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            ),
+            ("alg".into(), "A256GCM".into()),
+        ]))
+        .unwrap();
+        assert_eq!(
+            content_encryption.jwk_algorithm(),
+            Some(&JwkAlgorithm::ContentEncryption(
+                crate::jwe::ContentEncryptionAlgorithm::Aes256Gcm
+            ))
+        );
+
+        let custom = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+            ("k".into(), "AA".into()),
+            ("alg".into(), "urn:example:custom-alg".into()),
+        ]))
+        .unwrap();
+        assert_eq!(
+            custom.jwk_algorithm(),
+            Some(&JwkAlgorithm::Custom("urn:example:custom-alg".into()))
+        );
+        assert!(
+            custom
+                .to_json(super::super::OutputControlLevel::IncludeSymmetric)
+                .contains("\"alg\":\"urn:example:custom-alg\"")
+        );
+    }
+
+    #[test]
+    fn custom_algorithm_metadata_round_trips_json_escaping() {
+        let key = super::super::JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AA","alg":"urn:example:\"quoted\""}"#,
+        )
+        .unwrap();
+
+        let json = key.to_json(super::super::OutputControlLevel::IncludeSymmetric);
+        let reparsed = super::super::JsonWebKey::from_json(json).unwrap();
+        assert_eq!(reparsed.algorithm(), Some("urn:example:\"quoted\""));
     }
 }

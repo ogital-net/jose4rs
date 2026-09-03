@@ -106,7 +106,7 @@ impl ErrorCode {
     /// Create a consumer-defined error code.
     ///
     /// `code` must be negative. Positive values are reserved for
-    /// library-defined codes and cause a panic — passing one is almost
+    /// library-defined codes and cause a panic -- passing one is almost
     /// certainly a collision with a built-in failure and is rejected
     /// at the API edge so it can't silently mask a built-in check.
     ///

@@ -17,7 +17,7 @@ use simd_json::{
 
 use crate::{
     BufferRef, base64,
-    crypto::mem::Zeroizing,
+    crypto::mem::{Zeroizing, ZeroizingVec},
     error::JoseError,
     jwa::{AlgorithmConstraints, ConstraintType},
     jwk::JsonWebKey,
@@ -51,7 +51,7 @@ pub(super) struct ContentEncryptionParts {
 /// [`JsonWebStructure::set_compact_serialization`], decrypt by calling
 /// [`JsonWebEncryption::payload`].
 pub struct JsonWebEncryption<'a> {
-    buffer: Vec<u8>,
+    buffer: ZeroizingVec,
     header: Option<simd_json::owned::Value>,
     encoded_header: Option<BufferRef>,
     encrypted_key: Option<BufferRef>,
@@ -82,12 +82,6 @@ impl std::fmt::Debug for JsonWebEncryption<'_> {
     }
 }
 
-impl Drop for JsonWebEncryption<'_> {
-    fn drop(&mut self) {
-        crate::crypto::mem::cleanse(&mut self.buffer);
-    }
-}
-
 impl<'a> JsonWebEncryption<'a> {
     /// Creates a new, empty JWE. Set the `alg` and `enc` headers, a payload,
     /// and a key, then call [`JsonWebEncryption::encrypt`]; or parse an
@@ -95,7 +89,7 @@ impl<'a> JsonWebEncryption<'a> {
     /// [`JsonWebStructure::set_compact_serialization`] and decrypt it.
     pub fn new() -> Self {
         Self {
-            buffer: Vec::new(),
+            buffer: ZeroizingVec::new(Vec::new()),
             header: None,
             encoded_header: None,
             encrypted_key: None,
@@ -187,6 +181,7 @@ impl<'a> JsonWebEncryption<'a> {
 
         let cek = key_mgmt_alg.manage_decrypt(
             management_key,
+            &content_enc_alg,
             encrypted_key_ref.get(&self.buffer),
             headers,
         )?;
@@ -1107,6 +1102,74 @@ mod tests {
 
     fn permit(alg: KeyManagementAlgorithm) -> AlgorithmConstraints<KeyManagementAlgorithm> {
         AlgorithmConstraints::new(ConstraintType::Permit, [alg])
+    }
+
+    #[test]
+    fn rejects_mismatched_jwk_algorithm_on_encrypt_and_decrypt() {
+        let matching_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256KW"}"#,
+        )
+        .unwrap();
+        let mismatched_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256GCMKW"}"#,
+        )
+        .unwrap();
+        let constraints = permit(KeyManagementAlgorithm::A256Kw);
+
+        let mut enc = JsonWebEncryption::new();
+        enc.set_algorithm_constraints(&constraints);
+        enc.set_algorithm(KeyManagementAlgorithm::A256Kw);
+        enc.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
+        enc.set_payload(b"metadata restricted payload");
+        enc.encrypt(&matching_key).unwrap();
+        let compact = enc.compact_serialization().unwrap();
+
+        let mut wrong_enc = JsonWebEncryption::new();
+        wrong_enc.set_algorithm_constraints(&constraints);
+        wrong_enc.set_algorithm(KeyManagementAlgorithm::A256Kw);
+        wrong_enc.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
+        wrong_enc.set_payload(b"metadata restricted payload");
+        let encrypt_error = wrong_enc.encrypt(&mismatched_key).unwrap_err();
+        assert!(matches!(encrypt_error, JoseError::InvalidKey(_)));
+        assert!(encrypt_error.to_string().contains("A256GCMKW"));
+
+        let mut dec = JsonWebEncryption::new();
+        dec.set_algorithm_constraints(&constraints);
+        dec.set_compact_serialization(&compact).unwrap();
+        let decrypt_error = dec.payload(&mismatched_key).unwrap_err();
+        assert!(matches!(decrypt_error, JoseError::InvalidKey(_)));
+        assert!(decrypt_error.to_string().contains("A256GCMKW"));
+    }
+
+    #[test]
+    fn direct_accepts_matching_content_encryption_jwk_algorithm() {
+        let key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256GCM"}"#,
+        )
+        .unwrap();
+        let constraints = permit(KeyManagementAlgorithm::Direct);
+
+        let mut enc = JsonWebEncryption::new();
+        enc.set_algorithm_constraints(&constraints);
+        enc.set_algorithm(KeyManagementAlgorithm::Direct);
+        enc.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
+        enc.set_payload(b"direct payload");
+        enc.encrypt(&key).unwrap();
+        let compact = enc.compact_serialization().unwrap();
+
+        let mut dec = JsonWebEncryption::new();
+        dec.set_algorithm_constraints(&constraints);
+        dec.set_compact_serialization(&compact).unwrap();
+        assert_eq!(dec.payload(&key).unwrap(), b"direct payload");
+
+        let mut wrong_enc = JsonWebEncryption::new();
+        wrong_enc.set_algorithm_constraints(&constraints);
+        wrong_enc.set_algorithm(KeyManagementAlgorithm::Direct);
+        wrong_enc.set_encryption_method(ContentEncryptionAlgorithm::ChaCha20Poly1305);
+        wrong_enc.set_payload(b"direct payload");
+        let error = wrong_enc.encrypt(&key).unwrap_err();
+        assert!(matches!(error, JoseError::InvalidKey(_)));
+        assert!(error.to_string().contains("A256GCM"));
     }
 
     #[test]
