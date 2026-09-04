@@ -137,6 +137,37 @@ impl AsyncHttpsJwks {
             .retain_cache_on_error = d;
     }
 
+    /// Pre-seeds the cache with the given keys, valid for `ttl`.
+    ///
+    /// On the next [`keys`](Self::keys) call within `ttl`, no HTTP fetch is
+    /// performed. Useful when the consumer (e.g. an OIDC client) has already
+    /// obtained the JWKS via discovery and wants to skip a redundant fetch.
+    ///
+    /// `seed` always overwrites any existing cache entry.
+    pub fn seed(&self, keys: Vec<JsonWebKey>, ttl: Duration) {
+        let now = Instant::now();
+        let keys = Arc::new(keys);
+        let mut cache = self.state.cache.write().unwrap();
+        *cache = AsyncCache {
+            keys,
+            fresh_until: Some(now + ttl),
+            created: Some(now),
+        };
+    }
+
+    /// Convenience wrapper over [`seed`](Self::seed) that parses a raw JWKS
+    /// JSON document and seeds the cache with the default TTL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JSON is malformed or has no `"keys"` member.
+    pub fn seed_from_json(&self, body: impl AsRef<[u8]>) -> Result<(), JoseError> {
+        let set = JsonWebKeySet::from_json(body)?;
+        let keys = set.into_keys();
+        self.seed(keys, DEFAULT_CACHE_DURATION);
+        Ok(())
+    }
+
     /// Returns the current keys, refreshing from the endpoint if stale.
     ///
     /// # Errors
@@ -430,5 +461,115 @@ mod tests {
         // No kid: still matches by alg.
         let no_kid = block_on(jwks.select_verification_key(None, "ES256")).unwrap();
         assert!(no_kid.is_some());
+    }
+
+    // ---------- seed / seed_from_json tests ----------
+
+    fn seed_jwk_json(kid: &str) -> Vec<u8> {
+        // Minimal valid EC JWK with the requested kid; values are inert for
+        // signature verification, which is not what these tests exercise.
+        format!(
+            r#"{{"keys":[{{"kty":"EC","kid":"{kid}","crv":"P-256",\
+               "x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4",\
+               "y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}]}}"#
+        )
+        .into_bytes()
+    }
+
+    /// A fetcher whose `fetch` errors if invoked. Used to prove that a seeded
+    /// cache short-circuits network access entirely.
+    struct FailingAsyncFetcher;
+    impl AsyncJwksFetcher for FailingAsyncFetcher {
+        fn fetch<'a>(&'a self, _url: &'a str) -> FetchFuture<'a> {
+            Box::pin(async {
+                Err(JoseError::JwksFetch("fetcher should not be called".into()))
+            })
+        }
+    }
+
+    #[test]
+    fn test_seed_populates_cache_without_calling_fetcher() {
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
+        let key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![key], Duration::from_secs(60));
+
+        let keys = block_on(jwks.keys()).unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+    }
+
+    #[test]
+    fn test_seed_overwrites_prior_fetched_entry() {
+        // First response: 1 key with kid "the key". Second: kid "seeded".
+        // The mock always returns the same canned body, so we can't observe
+        // "fetcher not called" here -- instead, assert that seed() overwrites
+        // by checking the returned kid.
+        let fetcher = Arc::new(MockAsyncFetcher {
+            calls: AtomicUsize::new(0),
+        });
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Prime the cache.
+        let first_keys = block_on(jwks.keys()).unwrap();
+        assert_eq!(first_keys[0].key_id(), Some("the key"));
+        let calls_after_prime = fetcher.calls.load(Ordering::SeqCst);
+
+        // Seed with a different key.
+        let seeded_key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(60));
+
+        // The next read must come from the cache (the seeded entry), and must
+        // not have triggered a fetch.
+        let keys = block_on(jwks.keys()).unwrap();
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(
+            fetcher.calls.load(Ordering::SeqCst),
+            calls_after_prime,
+            "seed() must not call the fetcher"
+        );
+    }
+
+    #[test]
+    fn test_seed_resets_freshness_window() {
+        let fetcher = Arc::new(MockAsyncFetcher {
+            calls: AtomicUsize::new(0),
+        });
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Prime the cache.
+        block_on(jwks.keys()).unwrap();
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
+
+        // Seed with a long TTL.
+        let seeded_key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(3600));
+
+        // A second read returns the seeded entry, no fetch.
+        let keys = block_on(jwks.keys()).unwrap();
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_seed_from_json_succeeds() {
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
+        jwks.seed_from_json(&seed_jwk_json("from-json")).unwrap();
+
+        let keys = block_on(jwks.keys()).unwrap();
+        assert_eq!(keys[0].key_id(), Some("from-json"));
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_invalid_json() {
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
+        let err = jwks.seed_from_json(b"not json at all").unwrap_err();
+        let _ = format!("{err}");
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_missing_keys_member() {
+        let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
+        let err = jwks.seed_from_json(br#"{"other":"value"}"#).unwrap_err();
+        let _ = format!("{err}");
     }
 }

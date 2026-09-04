@@ -170,7 +170,36 @@ impl HttpsJwks {
             .expect("cannot set_retain_cache_on_error on a shared HttpsJwks")
             .retain_cache_on_error = d;
     }
+    /// Pre-seeds the cache with the given keys, valid for `ttl`.
+    ///
+    /// On the next [`keys`](Self::keys) call within `ttl`, no HTTP fetch is
+    /// performed. Useful when the consumer (e.g. an OIDC client) has already
+    /// obtained the JWKS via discovery and wants to skip a redundant fetch.
+    ///
+    /// `seed` always overwrites any existing cache entry.
+    pub fn seed(&self, keys: Vec<JsonWebKey>, ttl: Duration) {
+        let now = Instant::now();
+        let keys = Arc::new(keys);
+        let mut cache = self.state.cache.write().unwrap();
+        *cache = Cache {
+            keys,
+            fresh_until: Some(now + ttl),
+            created: Some(now),
+        };
+    }
 
+    /// Convenience wrapper over [`seed`](Self::seed) that parses a raw JWKS
+    /// JSON document and seeds the cache with the default TTL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JSON is malformed or has no `"keys"` member.
+    pub fn seed_from_json(&self, body: impl AsRef<[u8]>) -> Result<(), JoseError> {
+        let set = JsonWebKeySet::from_json(body)?;
+        let keys = set.into_keys();
+        self.seed(keys, DEFAULT_CACHE_DURATION);
+        Ok(())
+    }
     /// Returns the current keys, refreshing from the endpoint if the cache is
     /// stale.
     ///
@@ -407,14 +436,18 @@ impl HttpsJwks {
             .iter()
             .any(|d| matches!(d, CacheDirective::NoCache));
 
-        // 3) s-maxage > max-age; pick the most restrictive if both present.
-        let max_age = directives.iter().find_map(|d| match d {
-            CacheDirective::Freshness(dur) => Some(*dur),
-            _ => None,
-        });
+        // 3) s-maxage > max-age; per RFC 9111 section 5.2.2, when multiple
+        //    freshness lifetimes are present the most restrictive wins.
+        let freshness = directives
+            .iter()
+            .filter_map(|d| match d {
+                CacheDirective::Freshness(dur) => Some(*dur),
+                _ => None,
+            })
+            .min();
 
-        if let Some(dur) = max_age {
-            return dur;
+        if let Some(dur) = freshness {
+            return Duration::from_secs(dur);
         }
 
         if no_cache {
@@ -832,5 +865,124 @@ mod tests {
         // No kid: still matches by alg.
         let no_kid = jwks.select_verification_key(None, "ES256").unwrap();
         assert!(no_kid.is_some());
+    }
+
+    // ---------- seed / seed_from_json tests ----------
+
+    /// A single JWK (not a JWKS wrapper), suitable for `JsonWebKey::from_json`
+    /// / `seed()`. The EC point values are inert -- these tests exercise
+    /// seeding semantics, not signature verification.
+    fn single_jwk_json(kid: &str) -> Vec<u8> {
+        format!(
+            r#"{{"kty":"EC","kid":"{kid}","crv":"P-256",
+               "x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4",
+               "y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn test_seed_populates_cache_without_calling_fetcher() {
+        // Fetcher would error if called; the test passes iff seed bypasses it.
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        let key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![key.clone()], Duration::from_secs(60));
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(fetcher.calls(), 0, "fetcher must not be invoked after seed()");
+    }
+
+    #[test]
+    fn test_seed_overwrites_prior_fetched_entry() {
+        // First response: 1 key with kid "fetched".
+        let first_body = jwks_body(); // EC1 with kid "the key"
+        // Distinct second response: 1 key with kid "seeded".
+        let second_body = single_jwk_json("seeded");
+
+        let fetcher = Arc::new(MockFetcher::new(FetchResponse::new(first_body)));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // First read populates from the network.
+        let first_keys = jwks.keys().unwrap();
+        assert_eq!(first_keys.len(), 1);
+        assert_eq!(first_keys[0].key_id(), Some("the key"));
+        assert_eq!(fetcher.calls(), 1);
+
+        // Swap the canned response to prove seed() did not consult the fetcher.
+        *fetcher.response.lock().unwrap() =
+            Some(FetchResponse::new(second_body).with_cache_control("max-age=0"));
+
+        let seeded_key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(60));
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys[0].key_id(),
+            Some("seeded"),
+            "seed() must overwrite prior cached entry"
+        );
+        assert_eq!(fetcher.calls(), 1, "seed() must not call the fetcher");
+    }
+
+    #[test]
+    fn test_seed_resets_freshness_window() {
+        // Serve a max-age=0 response so the next read would normally refetch.
+        let fetcher = Arc::new(MockFetcher::new(
+            FetchResponse::new(jwks_body()).with_cache_control("max-age=0"),
+        ));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Prime the cache.
+        jwks.keys().unwrap();
+        assert_eq!(fetcher.calls(), 1);
+
+        // Seed with a long TTL -- subsequent reads must not trigger a refetch
+        // even though the original response was max-age=0.
+        let seeded_key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(3600));
+
+        // A second read returns the seeded entry, no fetch.
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[test]
+    fn test_seed_from_json_succeeds() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // seed_from_json expects a JWKS document (the wire format).
+        let body = jwks_body();
+        jwks.seed_from_json(&body).unwrap();
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id(), Some("the key"));
+        assert_eq!(fetcher.calls(), 0);
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_invalid_json() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+
+        let err = jwks.seed_from_json(b"not json at all").unwrap_err();
+        // Should be a parse error, not a panic and not a successful seed.
+        let _ = format!("{err}"); // display impl must work
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_missing_keys_member() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+
+        let err = jwks.seed_from_json(br#"{"other":"value"}"#).unwrap_err();
+        let _ = format!("{err}");
     }
 }
