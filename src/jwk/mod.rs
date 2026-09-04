@@ -13,6 +13,9 @@ use crate::{
     jws::AlgorithmIdentifier,
 };
 
+/// Shared cache-directive parsing used by both the sync and async JWKS fetchers.
+#[cfg(any(feature = "jwks-https", feature = "jwks-https-async"))]
+mod cache;
 /// Elliptic-curve (`EC`) JSON Web Keys.
 pub mod ec;
 #[cfg(feature = "jwks-https")]
@@ -35,8 +38,8 @@ mod set;
 
 #[cfg(feature = "jwks-https")]
 pub use https::{
-    DEFAULT_CACHE_DURATION, FetchResponse, HttpsJwks, JwksFetcher, KID_MISS_REFRESH_COOLDOWN,
-    REFRESH_REPRIEVE_THRESHOLD,
+    DEFAULT_CACHE_DURATION, DEFAULT_MINIMUM_CACHE_DURATION, FetchResponse, HttpsJwks, JwksFetcher,
+    KID_MISS_REFRESH_COOLDOWN, REFRESH_REPRIEVE_THRESHOLD,
 };
 #[cfg(feature = "jwks-https-async")]
 pub use https_async::{AsyncHttpsJwks, AsyncJwksFetcher, FetchFuture};

@@ -46,7 +46,7 @@ C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its ext
 
 **JWT** — claims construction/parsing and a validating consumer modeled on jose4j's `JwtConsumer`: issuer/audience/subject validation, temporal validation (`exp`, `nbf`, `iat`) with configurable clock skew, required-claim enforcement, prohibited claims, and max-future-validity. Nested JWT (JWS inside JWE) is supported.
 
-**JWKS over HTTPS** (optional) — a caching `HttpsJwks` fetcher with `Cache-Control`/`Expires` handling and refresh-on-miss. Bring your own HTTP transport: the blocking trait is under `jwks-https`, the async trait under `jwks-https-async`. Neither pulls in an HTTP client or async runtime.
+**JWKS over HTTPS** (optional) — a caching `HttpsJwks` fetcher with `Cache-Control`/`Expires` handling and refresh-on-miss. A configurable 60-second minimum cache duration prevents strict response directives from causing a fetch per token verification; key-ID misses still refresh immediately. Bring your own HTTP transport: the blocking trait is under `jwks-https`, the async trait under `jwks-https-async`. Neither pulls in an HTTP client or async runtime.
 
 ## Design properties
 

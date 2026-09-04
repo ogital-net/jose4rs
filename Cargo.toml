@@ -34,6 +34,8 @@ boring-sys = { version = "4", optional = true }
 # A downstream crate can override the backend (e.g. `zlib-rs`, `zlib-ng`) by
 # depending on flate2 with that feature; Cargo unifies it onto this build.
 flate2 = { version = "1", default-features = false, optional = true }
+futures-util = { version = "0.3", optional = true }
+httpdate = { version = "1", optional = true }
 memchr = "2"
 simd-json = { version = "0.18", default-features = false, features = [
     "runtime-detection",
@@ -62,8 +64,8 @@ zip = ["flate2/miniz_oxide"]
 # fetch trait (bring your own transport). `jwks-https-async` adds a native
 # async fetch trait for use from async runtimes such as tokio; it implies
 # `jwks-https`. Neither pulls in an HTTP client or async runtime.
-jwks-https = []
-jwks-https-async = ["jwks-https"]
+jwks-https = ["httpdate"]
+jwks-https-async = ["jwks-https", "futures-util"]
 
 # Pedantic clippy is enabled workspace-wide; the lints below are opted out.
 # The FFI casts are dominated by aws-lc / boring wrappers (C `c_int` returns,

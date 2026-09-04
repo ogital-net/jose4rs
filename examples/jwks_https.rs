@@ -3,7 +3,7 @@
 //! Requires the `jwks-https` feature:
 //! `cargo run --example jwks_https --features jwks-https`.
 //!
-//! The crate owns the cache/refresh policy (Cache-Control / Expires parsing,
+//! The crate owns the cache/refresh policy (Cache-Control / Expires / Age parsing,
 //! refresh single-flighting, retain-stale-on-error) but not the transport:
 //! you supply a [`JwksFetcher`] over whatever HTTP client your application
 //! already uses. This example wires up [`reqwest::blocking::Client`] for the
@@ -14,6 +14,7 @@
 //! Run with `cargo run --example jwks_https --features jwks-https`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use jose4rs::error::JoseError;
 use jose4rs::jwk::{FetchResponse, HttpsJwks, JwksFetcher};
@@ -51,6 +52,12 @@ impl JwksFetcher for ReqwestFetcher {
             .get(reqwest::header::EXPIRES)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
+        let age = resp
+            .headers()
+            .get(reqwest::header::AGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok())
+            .map(Duration::from_secs);
         let body = resp
             .bytes()
             .map_err(|e| JoseError::JwksFetch(e.to_string()))?
@@ -59,6 +66,7 @@ impl JwksFetcher for ReqwestFetcher {
             body,
             cache_control,
             expires,
+            age,
         })
     }
 }

@@ -7,6 +7,12 @@
 //! hard-coded HTTP client and free of any async runtime; async users bridge
 //! their client (or enable the `jwks-https-async` feature for a native async
 //! trait).
+//!
+//! Server freshness policy is parsed according to RFC 9111 section 4.2,
+//! including `Cache-Control`, `Expires`, and `Age`. By default, the cache then
+//! applies [`DEFAULT_MINIMUM_CACHE_DURATION`] as a JOSE-specific availability
+//! safeguard so strict directives cannot cause a fetch per token verification.
+//! Set the minimum to zero to use the server policy without that floor.
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -17,6 +23,14 @@ use crate::error::JoseError;
 /// The default cache lifetime, used when the response carries no usable
 /// cache directives. Matches jose4j's `defaultCacheDuration` of one hour.
 pub const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(3600);
+
+/// The default minimum time a successfully fetched JWKS is reused, even when
+/// the response requests immediate revalidation or no storage.
+///
+/// JWKS documents contain public keys, and fetching once per token would make
+/// verification dependent on endpoint availability and request volume. A
+/// `kid` miss and [`HttpsJwks::refresh`] still force an immediate refresh.
+pub const DEFAULT_MINIMUM_CACHE_DURATION: Duration = Duration::from_secs(60);
 
 /// Minimum interval between refresh attempts, to avoid a thundering herd when
 /// many threads see an expired cache at once. Matches jose4j's
@@ -30,9 +44,9 @@ pub const KID_MISS_REFRESH_COOLDOWN: Duration = Duration::from_secs(10);
 
 /// The response from fetching a JWKS document.
 ///
-/// Only the parts the cache logic needs are modeled: the body and the two
-/// cache directives. Everything else (status handling, redirects, TLS) is the
-/// fetcher's concern; a non-2xx response should be surfaced as an `Err`.
+/// Only the parts the cache logic needs are modeled: the body and cache
+/// freshness metadata. Everything else (status handling, redirects, TLS) is
+/// the fetcher's concern; a non-2xx response should be surfaced as an `Err`.
 #[derive(Debug, Clone)]
 pub struct FetchResponse {
     /// The response body -- the JWKS JSON document.
@@ -41,6 +55,8 @@ pub struct FetchResponse {
     pub cache_control: Option<String>,
     /// The value of the `Expires` header, if present (an HTTP-date).
     pub expires: Option<String>,
+    /// The parsed value of the `Age` header, if present.
+    pub age: Option<Duration>,
 }
 
 impl FetchResponse {
@@ -50,6 +66,7 @@ impl FetchResponse {
             body,
             cache_control: None,
             expires: None,
+            age: None,
         }
     }
 
@@ -64,14 +81,20 @@ impl FetchResponse {
         self.expires = Some(value.into());
         self
     }
+
+    /// Sets the parsed `Age` header value.
+    pub fn with_age(mut self, value: Duration) -> Self {
+        self.age = Some(value);
+        self
+    }
 }
 
 /// Supplies a JWKS document from an HTTPS endpoint.
 ///
 /// Implement this over whatever HTTP client your application already uses.
 /// The implementation should return an error for non-success HTTP statuses and
-/// for transport failures; it should surface the `Cache-Control` and `Expires`
-/// response headers so the cache can honor them.
+/// for transport failures; it should surface the `Cache-Control`, `Expires`,
+/// and `Age` response headers so the cache can honor them.
 ///
 /// The method is synchronous so the crate stays runtime-agnostic. From an
 /// async context, bridge with e.g. `tokio::task::block_in_place` +
@@ -107,6 +130,7 @@ struct Shared {
     cache: RwLock<Cache>,
     refresh_lock: Mutex<()>,
     default_cache_duration: Duration,
+    minimum_cache_duration: Duration,
     retain_cache_on_error: Duration,
     /// Last time a kid-miss refresh was attempted (penalty box).
     last_kid_miss_refresh: Mutex<Option<Instant>>,
@@ -117,8 +141,24 @@ struct Cache {
     keys: Arc<Vec<JsonWebKey>>,
     /// When the cached keys stop being fresh. `None` means expired.
     fresh_until: Option<Instant>,
-    /// When the cache was last (re)populated. `None` means never.
-    created: Option<Instant>,
+    /// Fixed upper bound for serving stale keys after refresh failures.
+    stale_until: Option<Instant>,
+    /// Suppresses repeated refresh attempts briefly while serving stale keys.
+    retry_after: Option<Instant>,
+    /// Changes whenever an entry is published or explicitly seeded.
+    generation: u64,
+}
+
+impl Cache {
+    fn empty() -> Self {
+        Self {
+            keys: Arc::new(Vec::new()),
+            fresh_until: None,
+            stale_until: None,
+            retry_after: None,
+            generation: 0,
+        }
+    }
 }
 
 impl HttpsJwks {
@@ -128,13 +168,10 @@ impl HttpsJwks {
             url: url.into(),
             fetcher,
             state: Arc::new(Shared {
-                cache: RwLock::new(Cache {
-                    keys: Arc::new(Vec::new()),
-                    fresh_until: None,
-                    created: None,
-                }),
+                cache: RwLock::new(Cache::empty()),
                 refresh_lock: Mutex::new(()),
                 default_cache_duration: DEFAULT_CACHE_DURATION,
+                minimum_cache_duration: DEFAULT_MINIMUM_CACHE_DURATION,
                 retain_cache_on_error: Duration::ZERO,
                 last_kid_miss_refresh: Mutex::new(None),
             }),
@@ -154,8 +191,25 @@ impl HttpsJwks {
             .default_cache_duration = d;
     }
 
-    /// Sets how long stale keys are retained after a refresh failure before
-    /// the error is surfaced. Zero (the default) propagates fetch errors.
+    /// Sets the minimum time a successfully fetched JWKS is reused.
+    ///
+    /// The default is [`DEFAULT_MINIMUM_CACHE_DURATION`]. This floor prevents
+    /// `no-cache`, `no-store`, `max-age=0`, or an expired `Expires` value from
+    /// causing a fetch for every token verification. A `kid` miss and
+    /// [`refresh`](Self::refresh) still bypass it. Set this to zero to honor
+    /// those HTTP directives strictly.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the `HttpsJwks` has already been cloned (shared).
+    pub fn set_minimum_cache_duration(&mut self, d: Duration) {
+        Arc::get_mut(&mut self.state)
+            .expect("cannot set_minimum_cache_duration on a shared HttpsJwks")
+            .minimum_cache_duration = d;
+    }
+
+    /// Sets how long keys may remain usable after freshness expires when a
+    /// refresh fails. Zero (the default) propagates fetch errors.
     ///
     /// # Panics
     ///
@@ -165,7 +219,44 @@ impl HttpsJwks {
             .expect("cannot set_retain_cache_on_error on a shared HttpsJwks")
             .retain_cache_on_error = d;
     }
+    /// Pre-seeds the cache with the given keys, valid for `ttl`.
+    ///
+    /// On the next [`keys`](Self::keys) call within `ttl`, no HTTP fetch is
+    /// performed. Useful when the consumer (e.g. an OIDC client) has already
+    /// obtained the JWKS via discovery and wants to skip a redundant fetch.
+    ///
+    /// `seed` always overwrites any existing cache entry.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal lock is poisoned.
+    pub fn seed(&self, keys: Vec<JsonWebKey>, ttl: Duration) {
+        let now = Instant::now();
+        let keys = Arc::new(keys);
+        let mut cache = self.state.cache.write().unwrap();
+        let fresh_until = now.checked_add(ttl);
+        *cache = Cache {
+            keys,
+            fresh_until,
+            stale_until: fresh_until
+                .and_then(|fresh| fresh.checked_add(self.state.retain_cache_on_error)),
+            retry_after: None,
+            generation: cache.generation.wrapping_add(1),
+        };
+    }
 
+    /// Convenience wrapper over [`seed`](Self::seed) that parses a raw JWKS
+    /// JSON document and seeds the cache with the default TTL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the JSON is malformed or has no `"keys"` member.
+    pub fn seed_from_json(&self, body: impl AsRef<[u8]>) -> Result<(), JoseError> {
+        let set = JsonWebKeySet::from_json(body)?;
+        let keys = set.into_keys();
+        self.seed(keys, self.state.default_cache_duration);
+        Ok(())
+    }
     /// Returns the current keys, refreshing from the endpoint if the cache is
     /// stale.
     ///
@@ -185,7 +276,10 @@ impl HttpsJwks {
         // Fast path: fresh cache.
         {
             let cache = self.state.cache.read().unwrap();
-            if cache.fresh_until.is_some_and(|t| Instant::now() < t) {
+            let now = Instant::now();
+            if cache.fresh_until.is_some_and(|t| now < t)
+                || cache.retry_after.is_some_and(|t| now < t)
+            {
                 return Ok(cache.keys.clone());
             }
         }
@@ -197,12 +291,9 @@ impl HttpsJwks {
         // Re-check after acquiring the lock: another thread may have refreshed.
         let prior = {
             let cache = self.state.cache.read().unwrap().clone();
-            // Refresh-reprieve: if it was populated very recently, don't fetch
-            // again even if already stale.
-            if cache.fresh_until.is_some_and(|t| Instant::now() < t)
-                || cache
-                    .created
-                    .is_some_and(|t| t.elapsed() < REFRESH_REPRIEVE_THRESHOLD)
+            let now = Instant::now();
+            if cache.fresh_until.is_some_and(|t| now < t)
+                || cache.retry_after.is_some_and(|t| now < t)
             {
                 return Ok(cache.keys.clone());
             }
@@ -210,24 +301,57 @@ impl HttpsJwks {
         };
 
         match self.fetch_and_parse() {
-            Ok((keys, cache_life)) => {
+            Ok((keys, cache_policy)) => {
                 let now = Instant::now();
                 let keys = Arc::new(keys);
                 let mut cache = self.state.cache.write().unwrap();
-                *cache = Cache {
-                    keys: keys.clone(),
-                    fresh_until: Some(now + cache_life),
-                    created: Some(now),
+                if cache.generation != prior.generation {
+                    return Ok(cache.keys.clone());
+                }
+                let generation = cache.generation.wrapping_add(1);
+                *cache = match cache_policy {
+                    super::cache::CachePolicy::CacheFor {
+                        lifetime,
+                        must_revalidate,
+                    } => {
+                        let fresh_until = now.checked_add(lifetime);
+                        Cache {
+                            keys: keys.clone(),
+                            fresh_until,
+                            stale_until: (!must_revalidate)
+                                .then_some(fresh_until)
+                                .flatten()
+                                .and_then(|fresh| {
+                                    fresh.checked_add(self.state.retain_cache_on_error)
+                                }),
+                            retry_after: None,
+                            generation,
+                        }
+                    }
+                    super::cache::CachePolicy::Revalidate
+                    | super::cache::CachePolicy::DoNotStore => Cache {
+                        keys: Arc::new(Vec::new()),
+                        fresh_until: None,
+                        stale_until: None,
+                        retry_after: None,
+                        generation,
+                    },
                 };
                 Ok(keys)
             }
             Err(e) => {
                 // Retain-stale-on-error: keep serving the prior keys for the
                 // configured window instead of surfacing the error.
-                if self.state.retain_cache_on_error > Duration::ZERO && !prior.keys.is_empty() {
-                    let mut cache = self.state.cache.write().unwrap();
-                    cache.fresh_until = Some(Instant::now() + self.state.retain_cache_on_error);
-                    return Ok(prior.keys);
+                let now = Instant::now();
+                let mut cache = self.state.cache.write().unwrap();
+                if cache.generation != prior.generation {
+                    return Ok(cache.keys.clone());
+                }
+                if !prior.keys.is_empty() && prior.stale_until.is_some_and(|until| now < until) {
+                    cache.retry_after = now
+                        .checked_add(REFRESH_REPRIEVE_THRESHOLD)
+                        .map(|retry| retry.min(prior.stale_until.unwrap()));
+                    return Ok(cache.keys.clone());
                 }
                 Err(e)
             }
@@ -248,7 +372,7 @@ impl HttpsJwks {
         {
             let mut cache = self.state.cache.write().unwrap();
             cache.fresh_until = None;
-            cache.created = None;
+            cache.retry_after = None;
         }
         self.keys()
     }
@@ -347,35 +471,40 @@ impl HttpsJwks {
         {
             let mut cache = self.state.cache.write().unwrap();
             cache.fresh_until = None;
-            cache.created = None;
+            cache.retry_after = None;
         }
         self.keys()
     }
 
-    fn fetch_and_parse(&self) -> Result<(Vec<JsonWebKey>, Duration), JoseError> {
+    fn fetch_and_parse(&self) -> Result<(Vec<JsonWebKey>, super::cache::CachePolicy), JoseError> {
         let response = self.fetcher.fetch(&self.url)?;
         let set = JsonWebKeySet::from_json(&response.body)?;
-        let cache_life = self.cache_life(&response);
-        Ok((set.into_keys(), cache_life))
+        let cache_policy = self.cache_policy(&response);
+        Ok((set.into_keys(), cache_policy))
     }
 
-    /// Computes the cache lifetime from the response's cache directives.
-    /// `Cache-Control: max-age` wins over `Expires`; both absent (or
-    /// non-positive) falls back to the default duration.
-    fn cache_life(&self, response: &FetchResponse) -> Duration {
-        if let Some(cc) = &response.cache_control
-            && let Some(secs) = parse_max_age(cc)
-            && secs > 0
-        {
-            return Duration::from_secs(secs);
-        }
-        if let Some(expires) = &response.expires
-            && let Some(secs) = parse_http_date_remaining(expires)
-            && secs > 0
-        {
-            return Duration::from_secs(secs);
-        }
-        self.state.default_cache_duration
+    /// Parses the server's RFC 9111 caching policy, then applies the configured
+    /// minimum JWKS cache duration.
+    ///
+    /// Precedence:
+    /// 1. `Cache-Control: no-store` -> strict policy does not retain it.
+    /// 2. `Cache-Control: no-cache` -> strict policy requires revalidation.
+    /// 3. `Cache-Control: max-age=N` -> `N` seconds, less response `Age`.
+    /// 4. `Expires` -> seconds until that HTTP-date.
+    /// 5. Otherwise -> the configured `default_cache_duration`.
+    ///
+    /// Per RFC 9111, `Cache-Control` takes precedence over `Expires`, and
+    /// `s-maxage` is ignored because this is a private cache. Unless configured
+    /// to zero, the minimum duration floors the resulting lifetime and marks
+    /// strict directives as requiring revalidation once that floor expires.
+    fn cache_policy(&self, response: &FetchResponse) -> super::cache::CachePolicy {
+        let policy = super::cache::compute_cache_policy(
+            response.cache_control.as_deref(),
+            response.expires.as_deref(),
+            response.age,
+            self.state.default_cache_duration,
+        );
+        super::cache::apply_minimum_cache_duration(policy, self.state.minimum_cache_duration)
     }
 }
 
@@ -389,87 +518,12 @@ impl Clone for HttpsJwks {
     }
 }
 
-/// Extracts `max-age` from a `Cache-Control` header value.
-///
-/// A crude substring parse (first `max-age` wins), mirroring jose4j; it is
-/// case-insensitive and tolerates surrounding whitespace. `s-maxage` is
-/// intentionally not matched.
-pub(super) fn parse_max_age(cache_control: &str) -> Option<u64> {
-    let cc = cache_control.to_ascii_lowercase();
-    let idx = cc.find("max-age")?;
-    let rest = &cc[idx + "max-age".len()..];
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('=')?;
-    let rest = rest.trim_start();
-    // Take up to the next directive separator.
-    let num: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    num.parse().ok()
-}
-
-/// Parses an HTTP-date (`Expires` header) and returns the whole seconds
-/// remaining until then. Returns `None` if the date can't be parsed.
-///
-/// Only the IMF-fixdate format (the required HTTP-date form) is supported,
-/// e.g. `Sun, 06 Nov 1994 08:49:37 GMT`.
-pub(super) fn parse_http_date_remaining(date: &str) -> Option<u64> {
-    let then = parse_imf_fixdate(date)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-    Some(then.saturating_sub(now))
-}
-
-/// Parses an IMF-fixdate into seconds since the Unix epoch.
-fn parse_imf_fixdate(date: &str) -> Option<u64> {
-    // "Sun, 06 Nov 1994 08:49:37 GMT"
-    let date = date.trim();
-    let comma = date.find(',')?;
-    let rest = date[comma + 1..].trim();
-    let mut parts = rest.split_whitespace();
-
-    let day: u64 = parts.next()?.parse().ok()?;
-    let month = match parts.next()? {
-        "Jan" => 1,
-        "Feb" => 2,
-        "Mar" => 3,
-        "Apr" => 4,
-        "May" => 5,
-        "Jun" => 6,
-        "Jul" => 7,
-        "Aug" => 8,
-        "Sep" => 9,
-        "Oct" => 10,
-        "Nov" => 11,
-        "Dec" => 12,
-        _ => return None,
-    };
-    let year: u64 = parts.next()?.parse().ok()?;
-    let time = parts.next()?;
-    let mut time_parts = time.split(':');
-    let hour: u64 = time_parts.next()?.parse().ok()?;
-    let min: u64 = time_parts.next()?.parse().ok()?;
-    let sec: u64 = time_parts.next()?.parse().ok()?;
-
-    Some(days_since_epoch(year, month, day) * 86_400 + hour * 3600 + min * 60 + sec)
-}
-
-/// Days since the Unix epoch for a Gregorian calendar date (civil algorithm).
-fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
-    // Howard Hinnant's civil-from-days, inverted.
-    let y = if month <= 2 { year - 1 } else { year } as i64;
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let mp = (month as i64 + 9) % 12; // [0, 11]
-    let doy = (153 * mp + 2) / 5 + day as i64 - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    (era * 146097 + doe - 719468) as u64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
 
     const EC1: &str = r#"{"kty":"EC","use":"sig","kid":"the key","x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4","y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co","crv":"P-256"}"#;
 
@@ -521,37 +575,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_parse_max_age() {
-        assert_eq!(parse_max_age("max-age=3600"), Some(3600));
-        assert_eq!(parse_max_age("public, max-age=60"), Some(60));
-        assert_eq!(parse_max_age("max-age=0"), Some(0));
-        assert_eq!(parse_max_age("MAX-AGE=120"), Some(120));
-        assert_eq!(parse_max_age("max-age = 30"), Some(30));
-        assert_eq!(parse_max_age("no-cache"), None);
-        // "s-maxage" has no hyphen between "max" and "age", so it is not
-        // matched by a "max-age" substring search.
-        assert_eq!(parse_max_age("s-maxage=10"), None);
-        assert_eq!(parse_max_age("max-age=abc"), None);
+    struct SequenceFetcher {
+        responses: Mutex<VecDeque<Result<FetchResponse, JoseError>>>,
     }
 
-    #[test]
-    fn test_parse_http_date() {
-        // Sun, 06 Nov 1994 08:49:37 GMT == 784111777
-        assert_eq!(
-            parse_imf_fixdate("Sun, 06 Nov 1994 08:49:37 GMT"),
-            Some(784111777)
-        );
-        // Remaining seconds for a far-future date should be positive.
-        let future = parse_http_date_remaining("Sun, 06 Nov 2094 08:49:37 GMT");
-        assert!(future.is_some() && future.unwrap() > 0);
-        // A past date saturates to 0.
-        assert_eq!(
-            parse_http_date_remaining("Sun, 06 Nov 1994 08:49:37 GMT"),
-            Some(0)
-        );
-        // Garbage.
-        assert_eq!(parse_http_date_remaining("not a date"), None);
+    impl SequenceFetcher {
+        fn new(responses: Vec<Result<FetchResponse, JoseError>>) -> Self {
+            Self {
+                responses: Mutex::new(responses.into()),
+            }
+        }
+    }
+
+    impl JwksFetcher for SequenceFetcher {
+        fn fetch(&self, _url: &str) -> Result<FetchResponse, JoseError> {
+            self.responses
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected fetch")
+        }
     }
 
     #[test]
@@ -570,18 +613,59 @@ mod tests {
     }
 
     #[test]
-    fn test_max_age_zero_goes_stale_and_refreshes() {
-        // max-age=0 means immediately stale. After the refresh-reprieve
-        // threshold passes, the next read refetches.
+    fn test_refresh_bypasses_minimum_cache_duration() {
         let fetcher = Arc::new(MockFetcher::new(
             FetchResponse::new(jwks_body()).with_cache_control("max-age=0"),
         ));
         let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
         jwks.keys().unwrap();
         assert_eq!(fetcher.calls(), 1);
-        // Force a refresh (bypasses the reprieve window).
+        // Explicit refresh bypasses the minimum cache duration.
         jwks.refresh().unwrap();
         assert_eq!(fetcher.calls(), 2);
+    }
+
+    #[test]
+    fn test_minimum_cache_duration_prevents_fetch_per_verification() {
+        for directive in ["no-store", "no-cache, max-age=300"] {
+            let fetcher = Arc::new(MockFetcher::new(
+                FetchResponse::new(jwks_body()).with_cache_control(directive),
+            ));
+            let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+            jwks.keys().unwrap();
+            jwks.keys().unwrap();
+
+            assert_eq!(fetcher.calls(), 1, "directive: {directive}");
+        }
+    }
+
+    #[test]
+    fn test_zero_minimum_cache_duration_honors_strict_directives() {
+        for directive in ["no-store", "no-cache, max-age=300"] {
+            let fetcher = Arc::new(MockFetcher::new(
+                FetchResponse::new(jwks_body()).with_cache_control(directive),
+            ));
+            let mut jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+            jwks.set_minimum_cache_duration(Duration::ZERO);
+
+            jwks.keys().unwrap();
+            jwks.keys().unwrap();
+
+            assert_eq!(fetcher.calls(), 2, "directive: {directive}");
+        }
+    }
+
+    #[test]
+    fn test_clone_shares_cache_state() {
+        let fetcher = Arc::new(MockFetcher::new(FetchResponse::new(jwks_body())));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+        let cloned = jwks.clone();
+
+        jwks.keys().unwrap();
+        cloned.keys().unwrap();
+
+        assert_eq!(fetcher.calls(), 1);
     }
 
     #[test]
@@ -601,6 +685,83 @@ mod tests {
         jwks2.set_retain_cache_on_error(Duration::from_secs(60));
         // No prior cache => error surfaces (nothing to retain).
         assert!(jwks2.keys().is_err());
+    }
+
+    #[test]
+    fn test_stale_deadline_is_not_renewed_by_failures() {
+        let failure = || Err(JoseError::JwksFetch("network down".into()));
+        let fetcher = Arc::new(SequenceFetcher::new(vec![
+            Ok(FetchResponse::new(jwks_body()).with_cache_control("max-age=0")),
+            failure(),
+            failure(),
+            failure(),
+        ]));
+        let mut jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+        jwks.set_retain_cache_on_error(Duration::from_secs(60));
+
+        jwks.keys().unwrap();
+        let original_deadline = jwks.state.cache.read().unwrap().stale_until;
+        jwks.refresh().unwrap();
+        jwks.refresh().unwrap();
+        assert_eq!(
+            jwks.state.cache.read().unwrap().stale_until,
+            original_deadline
+        );
+
+        {
+            let mut cache = jwks.state.cache.write().unwrap();
+            cache.stale_until = Some(Instant::now());
+            cache.retry_after = None;
+        }
+        assert!(jwks.refresh().is_err());
+    }
+
+    #[test]
+    fn test_must_revalidate_disables_stale_fallback() {
+        let fetcher = Arc::new(SequenceFetcher::new(vec![
+            Ok(FetchResponse::new(jwks_body()).with_cache_control("max-age=0, must-revalidate")),
+            Err(JoseError::JwksFetch("network down".into())),
+        ]));
+        let mut jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+        jwks.set_retain_cache_on_error(Duration::from_secs(60));
+
+        jwks.keys().unwrap();
+        assert!(jwks.refresh().is_err());
+    }
+
+    #[test]
+    fn test_seed_wins_over_in_flight_fetch() {
+        struct BlockingFetcher {
+            started: mpsc::SyncSender<()>,
+            release: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl JwksFetcher for BlockingFetcher {
+            fn fetch(&self, _url: &str) -> Result<FetchResponse, JoseError> {
+                self.started.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+                Ok(FetchResponse::new(jwks_body()).with_cache_control("max-age=300"))
+            }
+        }
+
+        let (started_tx, started_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let fetcher = Arc::new(BlockingFetcher {
+            started: started_tx,
+            release: Mutex::new(release_rx),
+        });
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+        let fetching = jwks.clone();
+        let handle = std::thread::spawn(move || fetching.keys());
+
+        started_rx.recv().unwrap();
+        let seeded = JsonWebKey::from_json(single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded], Duration::from_secs(60));
+        release_tx.send(()).unwrap();
+
+        let keys = handle.join().unwrap().unwrap();
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(jwks.keys().unwrap()[0].key_id(), Some("seeded"));
     }
 
     #[test]
@@ -691,5 +852,128 @@ mod tests {
         // No kid: still matches by alg.
         let no_kid = jwks.select_verification_key(None, "ES256").unwrap();
         assert!(no_kid.is_some());
+    }
+
+    // ---------- seed / seed_from_json tests ----------
+
+    /// A single JWK (not a JWKS wrapper), suitable for `JsonWebKey::from_json`
+    /// / `seed()`. The EC point values are inert -- these tests exercise
+    /// seeding semantics, not signature verification.
+    fn single_jwk_json(kid: &str) -> Vec<u8> {
+        format!(
+            r#"{{"kty":"EC","kid":"{kid}","crv":"P-256",
+               "x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4",
+               "y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}"#
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn test_seed_populates_cache_without_calling_fetcher() {
+        // Fetcher would error if called; the test passes iff seed bypasses it.
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        let key = JsonWebKey::from_json(single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![key.clone()], Duration::from_secs(60));
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(
+            fetcher.calls(),
+            0,
+            "fetcher must not be invoked after seed()"
+        );
+    }
+
+    #[test]
+    fn test_seed_overwrites_prior_fetched_entry() {
+        // First response: 1 key with kid "fetched".
+        let first_body = jwks_body(); // EC1 with kid "the key"
+        // Distinct second response: 1 key with kid "seeded".
+        let second_body = single_jwk_json("seeded");
+
+        let fetcher = Arc::new(MockFetcher::new(FetchResponse::new(first_body)));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // First read populates from the network.
+        let first_keys = jwks.keys().unwrap();
+        assert_eq!(first_keys.len(), 1);
+        assert_eq!(first_keys[0].key_id(), Some("the key"));
+        assert_eq!(fetcher.calls(), 1);
+
+        // Swap the canned response to prove seed() did not consult the fetcher.
+        *fetcher.response.lock().unwrap() =
+            Some(FetchResponse::new(second_body).with_cache_control("max-age=0"));
+
+        let seeded_key = JsonWebKey::from_json(single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(60));
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(
+            keys[0].key_id(),
+            Some("seeded"),
+            "seed() must overwrite prior cached entry"
+        );
+        assert_eq!(fetcher.calls(), 1, "seed() must not call the fetcher");
+    }
+
+    #[test]
+    fn test_seed_resets_freshness_window() {
+        // Serve a max-age=0 response so the next read would normally refetch.
+        let fetcher = Arc::new(MockFetcher::new(
+            FetchResponse::new(jwks_body()).with_cache_control("max-age=0"),
+        ));
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // Prime the cache.
+        jwks.keys().unwrap();
+        assert_eq!(fetcher.calls(), 1);
+
+        // Seed with a long TTL -- subsequent reads must not trigger a refetch
+        // even though the original response was max-age=0.
+        let seeded_key = JsonWebKey::from_json(single_jwk_json("seeded")).unwrap();
+        jwks.seed(vec![seeded_key], Duration::from_secs(3600));
+
+        // A second read returns the seeded entry, no fetch.
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys[0].key_id(), Some("seeded"));
+        assert_eq!(fetcher.calls(), 1);
+    }
+
+    #[test]
+    fn test_seed_from_json_succeeds() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher.clone());
+
+        // seed_from_json expects a JWKS document (the wire format).
+        let body = jwks_body();
+        jwks.seed_from_json(&body).unwrap();
+
+        let keys = jwks.keys().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].key_id(), Some("the key"));
+        assert_eq!(fetcher.calls(), 0);
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_invalid_json() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+
+        let err = jwks.seed_from_json(b"not json at all").unwrap_err();
+        // Should be a parse error, not a panic and not a successful seed.
+        let _ = format!("{err}"); // display impl must work
+    }
+
+    #[test]
+    fn test_seed_from_json_rejects_missing_keys_member() {
+        let fetcher = Arc::new(MockFetcher::failing());
+        let jwks = HttpsJwks::new("https://example.com/jwks", fetcher);
+
+        let err = jwks.seed_from_json(br#"{"other":"value"}"#).unwrap_err();
+        let _ = format!("{err}");
     }
 }

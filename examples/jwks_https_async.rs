@@ -14,6 +14,7 @@
 //! (`AsyncHttpsJwks`, `select_verification_key`) is runtime-agnostic.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use jose4rs::error::JoseError;
 use jose4rs::jwk::{AsyncHttpsJwks, AsyncJwksFetcher, FetchFuture, FetchResponse};
@@ -53,6 +54,12 @@ impl AsyncJwksFetcher for ReqwestAsyncFetcher {
                 .get(reqwest::header::EXPIRES)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
+            let age = resp
+                .headers()
+                .get(reqwest::header::AGE)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse().ok())
+                .map(Duration::from_secs);
             let body = resp
                 .bytes()
                 .await
@@ -62,6 +69,7 @@ impl AsyncJwksFetcher for ReqwestAsyncFetcher {
                 body,
                 cache_control,
                 expires,
+                age,
             })
         })
     }

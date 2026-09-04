@@ -1132,6 +1132,8 @@ dependencies = [
  "criterion",
  "dhat",
  "flate2",
+ "futures-util",
+ "httpdate",
  "josekit",
  "jsonwebtoken",
  "memchr",
