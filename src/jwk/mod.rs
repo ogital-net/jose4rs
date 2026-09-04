@@ -13,6 +13,9 @@ use crate::{
     jws::AlgorithmIdentifier,
 };
 
+/// Shared cache-directive parsing used by both the sync and async JWKS fetchers.
+#[cfg(any(feature = "jwks-https", feature = "jwks-https-async"))]
+mod cache;
 /// Elliptic-curve (`EC`) JSON Web Keys.
 pub mod ec;
 #[cfg(feature = "jwks-https")]

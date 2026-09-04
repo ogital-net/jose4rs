@@ -329,7 +329,7 @@ impl AsyncHttpsJwks {
     async fn fetch_and_parse(&self) -> Result<(Vec<JsonWebKey>, Duration), JoseError> {
         let response = self.fetcher.fetch(&self.url).await?;
         let set = JsonWebKeySet::from_json(&response.body)?;
-        let lifetime = HttpsJwks::compute_cache_lifetime(
+        let lifetime = super::cache::compute_cache_lifetime(
             response.cache_control.as_deref(),
             response.expires.as_deref(),
             self.state.default_cache_duration,
@@ -465,13 +465,20 @@ mod tests {
 
     // ---------- seed / seed_from_json tests ----------
 
-    fn seed_jwk_json(kid: &str) -> Vec<u8> {
-        // Minimal valid EC JWK with the requested kid; values are inert for
-        // signature verification, which is not what these tests exercise.
+    fn jwks_single_key(kid: &str) -> Vec<u8> {
+        // Minimal valid JWKS with a single EC key. Values are inert; these
+        // tests exercise caching/seeding semantics, not signature verification.
         format!(
-            r#"{{"keys":[{{"kty":"EC","kid":"{kid}","crv":"P-256",\
-               "x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4",\
-               "y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}]}}"#
+            r#"{{"keys":[{{"kty":"EC","kid":"{kid}","crv":"P-256","x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4","y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}]}}"#
+        )
+        .into_bytes()
+    }
+
+    fn single_jwk_json(kid: &str) -> Vec<u8> {
+        // Minimal valid single JWK (no JWKS wrapper), suitable for
+        // `JsonWebKey::from_json` / `seed()`.
+        format!(
+            r#"{{"kty":"EC","kid":"{kid}","crv":"P-256","x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4","y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}}"#
         )
         .into_bytes()
     }
@@ -490,7 +497,7 @@ mod tests {
     #[test]
     fn test_seed_populates_cache_without_calling_fetcher() {
         let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
-        let key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        let key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
         jwks.seed(vec![key], Duration::from_secs(60));
 
         let keys = block_on(jwks.keys()).unwrap();
@@ -515,7 +522,7 @@ mod tests {
         let calls_after_prime = fetcher.calls.load(Ordering::SeqCst);
 
         // Seed with a different key.
-        let seeded_key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        let seeded_key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
         jwks.seed(vec![seeded_key], Duration::from_secs(60));
 
         // The next read must come from the cache (the seeded entry), and must
@@ -541,7 +548,7 @@ mod tests {
         assert_eq!(fetcher.calls.load(Ordering::SeqCst), 1);
 
         // Seed with a long TTL.
-        let seeded_key = JsonWebKey::from_json(&seed_jwk_json("seeded")).unwrap();
+        let seeded_key = JsonWebKey::from_json(&single_jwk_json("seeded")).unwrap();
         jwks.seed(vec![seeded_key], Duration::from_secs(3600));
 
         // A second read returns the seeded entry, no fetch.
@@ -553,10 +560,10 @@ mod tests {
     #[test]
     fn test_seed_from_json_succeeds() {
         let jwks = AsyncHttpsJwks::new("https://example.com/jwks", Arc::new(FailingAsyncFetcher));
-        jwks.seed_from_json(&seed_jwk_json("from-json")).unwrap();
+        jwks.seed_from_json(&jwks_body()).unwrap();
 
         let keys = block_on(jwks.keys()).unwrap();
-        assert_eq!(keys[0].key_id(), Some("from-json"));
+        assert_eq!(keys[0].key_id(), Some("the key"));
     }
 
     #[test]
