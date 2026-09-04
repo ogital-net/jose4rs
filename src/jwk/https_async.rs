@@ -298,23 +298,12 @@ impl AsyncHttpsJwks {
     async fn fetch_and_parse(&self) -> Result<(Vec<JsonWebKey>, Duration), JoseError> {
         let response = self.fetcher.fetch(&self.url).await?;
         let set = JsonWebKeySet::from_json(&response.body)?;
-        Ok((set.into_keys(), self.cache_life(&response)))
-    }
-
-    fn cache_life(&self, response: &FetchResponse) -> Duration {
-        if let Some(cc) = &response.cache_control
-            && let Some(secs) = super::https::parse_max_age(cc)
-            && secs > 0
-        {
-            return Duration::from_secs(secs);
-        }
-        if let Some(expires) = &response.expires
-            && let Some(secs) = super::https::parse_http_date_remaining(expires)
-            && secs > 0
-        {
-            return Duration::from_secs(secs);
-        }
-        self.state.default_cache_duration
+        let lifetime = HttpsJwks::compute_cache_lifetime(
+            response.cache_control.as_deref(),
+            response.expires.as_deref(),
+            self.state.default_cache_duration,
+        );
+        Ok((set.into_keys(), lifetime))
     }
 }
 

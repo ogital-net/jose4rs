@@ -7,6 +7,11 @@
 //! hard-coded HTTP client and free of any async runtime; async users bridge
 //! their client (or enable the `jwks-https-async` feature for a native async
 //! trait).
+//!
+//! Cache freshness follows RFC 9111 section 4.2 with HTTP-cache-aware parsing of the
+//! `Cache-Control` response header (`max-age`, `s-maxage`, `no-cache`,
+//! `no-store`). The `Expires` header is consulted only when no freshness
+//! directive is present.
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -359,24 +364,116 @@ impl HttpsJwks {
         Ok((set.into_keys(), cache_life))
     }
 
-    /// Computes the cache lifetime from the response's cache directives.
-    /// `Cache-Control: max-age` wins over `Expires`; both absent (or
-    /// non-positive) falls back to the default duration.
+    /// Computes the cache lifetime from the response's cache directives,
+    /// implementing RFC 9111 section 4.2 freshness.
+    ///
+    /// Precedence:
+    /// 1. `Cache-Control: no-store` -> no caching (returns a zero lifetime;
+    ///    callers should treat this as "do not store").
+    /// 2. `Cache-Control: max-age=N` (or `s-maxage=N`) -> `N` seconds.
+    /// 3. `Expires` -> seconds until that HTTP-date.
+    /// 4. Otherwise -> the configured `default_cache_duration`.
+    ///
+    /// Per RFC 9111, `Cache-Control` takes precedence over `Expires`, and
+    /// `s-maxage` takes precedence over `max-age`. `no-cache` (without
+    /// `max-age`) forces a zero lifetime so we revalidate every read.
     fn cache_life(&self, response: &FetchResponse) -> Duration {
-        if let Some(cc) = &response.cache_control
-            && let Some(secs) = parse_max_age(cc)
-            && secs > 0
+        HttpsJwks::compute_cache_lifetime(
+            response.cache_control.as_deref(),
+            response.expires.as_deref(),
+            self.state.default_cache_duration,
+        )
+    }
+
+    /// Shared cache-lifetime computation, free of any `self` borrow so the
+    /// async path can reuse the exact same logic without risk of divergence.
+    pub(crate) fn compute_cache_lifetime(
+        cache_control: Option<&str>,
+        expires: Option<&str>,
+        default_cache_duration: Duration,
+    ) -> Duration {
+        let directives = cache_control.map(parse_cache_control).unwrap_or_default();
+
+        // 1) no-store: refuse to cache.
+        if directives
+            .iter()
+            .any(|d| matches!(d, CacheDirective::NoStore))
         {
-            return Duration::from_secs(secs);
+            return Duration::ZERO;
         }
-        if let Some(expires) = &response.expires
+
+        // 2) no-cache (without max-age): force revalidation each read.
+        let no_cache = directives
+            .iter()
+            .any(|d| matches!(d, CacheDirective::NoCache));
+
+        // 3) s-maxage > max-age; pick the most restrictive if both present.
+        let max_age = directives.iter().find_map(|d| match d {
+            CacheDirective::Freshness(dur) => Some(*dur),
+            _ => None,
+        });
+
+        if let Some(dur) = max_age {
+            return dur;
+        }
+
+        if no_cache {
+            return Duration::ZERO;
+        }
+
+        // 4) Fall back to Expires.
+        if let Some(expires) = expires
             && let Some(secs) = parse_http_date_remaining(expires)
             && secs > 0
         {
             return Duration::from_secs(secs);
         }
-        self.state.default_cache_duration
+
+        // 5) Last resort: the configured default.
+        default_cache_duration
     }
+}
+
+/// A single parsed directive from a `Cache-Control` response header.
+#[derive(Debug, PartialEq, Eq)]
+enum CacheDirective {
+    /// `max-age=<seconds>` or `s-maxage=<seconds>` -- seconds to freshness.
+    /// Negative values are stored as zero per RFC 9111 section 5.2.2.1.
+    Freshness(u64),
+    /// `no-cache` -- must revalidate before reuse.
+    NoCache,
+    /// `no-store` -- must not be stored at all.
+    NoStore,
+}
+
+/// Parses a `Cache-Control` header value into a list of directives.
+///
+/// Splits on `,`, trims whitespace, lowercases the directive name, and parses
+/// the parameter. Unknown directives are ignored. A directive with a missing
+/// or unparseable parameter is ignored. `max-age` and `s-maxage` with
+/// negative parameters are clamped to zero.
+fn parse_cache_control(value: &str) -> Vec<CacheDirective> {
+    let mut out = Vec::new();
+    for raw in value.split(',') {
+        let part = raw.trim_ascii();
+        if part.is_empty() {
+            continue;
+        }
+        let mut it = part.splitn(2, '=');
+        let name = it.next().unwrap_or("").trim_ascii().to_ascii_lowercase();
+        let arg = it.next().map(|s| s.trim_ascii());
+        match (name.as_str(), arg) {
+            ("max-age", Some(v)) | ("s-maxage", Some(v)) => {
+                if let Ok(n) = v.trim_ascii().parse::<i64>() {
+                    out.push(CacheDirective::Freshness(n.max(0) as u64));
+                }
+            }
+            ("no-cache", _) => out.push(CacheDirective::NoCache),
+            ("no-store", _) => out.push(CacheDirective::NoStore),
+            _ => {}
+        }
+    }
+    out
 }
 
 impl Clone for HttpsJwks {
@@ -389,21 +486,28 @@ impl Clone for HttpsJwks {
     }
 }
 
-/// Extracts `max-age` from a `Cache-Control` header value.
+/// Extracts the freshness lifetime from a `Cache-Control` header value.
 ///
-/// A crude substring parse (first `max-age` wins), mirroring jose4j; it is
-/// case-insensitive and tolerates surrounding whitespace. `s-maxage` is
-/// intentionally not matched.
+/// Returns the smallest of `max-age` / `s-maxage` values present, per the
+/// precedence rules of RFC 9111 section 5.2.2. `no-store` returns `None`, since the
+/// response should not be stored at all. `no-cache` (without an explicit
+/// freshness lifetime) also returns `None`, leaving the caller to decide.
+#[allow(dead_code)]
 pub(super) fn parse_max_age(cache_control: &str) -> Option<u64> {
-    let cc = cache_control.to_ascii_lowercase();
-    let idx = cc.find("max-age")?;
-    let rest = &cc[idx + "max-age".len()..];
-    let rest = rest.trim_start();
-    let rest = rest.strip_prefix('=')?;
-    let rest = rest.trim_start();
-    // Take up to the next directive separator.
-    let num: String = rest.chars().take_while(char::is_ascii_digit).collect();
-    num.parse().ok()
+    let directives = parse_cache_control(cache_control);
+    if directives
+        .iter()
+        .any(|d| matches!(d, CacheDirective::NoStore))
+    {
+        return None;
+    }
+    directives
+        .iter()
+        .filter_map(|d| match d {
+            CacheDirective::Freshness(dur) => Some(*dur),
+            _ => None,
+        })
+        .min()
 }
 
 /// Parses an HTTP-date (`Expires` header) and returns the whole seconds
@@ -423,9 +527,9 @@ pub(super) fn parse_http_date_remaining(date: &str) -> Option<u64> {
 /// Parses an IMF-fixdate into seconds since the Unix epoch.
 fn parse_imf_fixdate(date: &str) -> Option<u64> {
     // "Sun, 06 Nov 1994 08:49:37 GMT"
-    let date = date.trim();
+    let date = date.trim_ascii();
     let comma = date.find(',')?;
-    let rest = date[comma + 1..].trim();
+    let rest = date[comma + 1..].trim_ascii();
     let mut parts = rest.split_whitespace();
 
     let day: u64 = parts.next()?.parse().ok()?;
@@ -529,10 +633,47 @@ mod tests {
         assert_eq!(parse_max_age("MAX-AGE=120"), Some(120));
         assert_eq!(parse_max_age("max-age = 30"), Some(30));
         assert_eq!(parse_max_age("no-cache"), None);
-        // "s-maxage" has no hyphen between "max" and "age", so it is not
-        // matched by a "max-age" substring search.
-        assert_eq!(parse_max_age("s-maxage=10"), None);
+        // s-maxage should be picked up.
+        assert_eq!(parse_max_age("s-maxage=10"), Some(10));
+        // Multiple max-age: take the smallest (most restrictive).
+        assert_eq!(parse_max_age("max-age=120, max-age=60"), Some(60));
+        // Mixed max-age / s-maxage: take the smallest of all freshness.
+        assert_eq!(parse_max_age("max-age=120, s-maxage=30"), Some(30));
+        // no-store: no caching at all.
+        assert_eq!(parse_max_age("no-store"), None);
+        assert_eq!(parse_max_age("no-store, max-age=60"), None);
+        // Garbage values fall back to None.
         assert_eq!(parse_max_age("max-age=abc"), None);
+    }
+
+    #[test]
+    fn test_parse_cache_control_directives() {
+        // Empty / whitespace input.
+        assert!(parse_cache_control("").is_empty());
+        assert!(parse_cache_control("   ").is_empty());
+        assert!(parse_cache_control(",,").is_empty());
+        // Unknown directives are dropped.
+        assert!(parse_cache_control("foo, bar=baz").is_empty());
+        // max-age alone.
+        assert_eq!(
+            parse_cache_control("max-age=42"),
+            vec![CacheDirective::Freshness(42)]
+        );
+        // s-maxage alone.
+        assert_eq!(
+            parse_cache_control("s-maxage=42"),
+            vec![CacheDirective::Freshness(42)]
+        );
+        // Negative freshness is clamped to zero (RFC 9111 section 5.2.2.1).
+        assert_eq!(
+            parse_cache_control("max-age=-1"),
+            vec![CacheDirective::Freshness(0)]
+        );
+        // Mixed directives, with surrounding whitespace.
+        let parsed = parse_cache_control("  no-cache , max-age=10 , no-store  ");
+        assert!(parsed.contains(&CacheDirective::NoCache));
+        assert!(parsed.contains(&CacheDirective::NoStore));
+        assert!(parsed.contains(&CacheDirective::Freshness(10)));
     }
 
     #[test]
