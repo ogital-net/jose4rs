@@ -13,7 +13,7 @@ A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516
 
 ## Status
 
-Early release (0.4.x): the API may still change between minor versions, but the implementation is complete for the standards listed below and is covered by an extensive test suite, including the jose4j test vectors.
+Early release (0.5.x): the API may still change between minor versions, but the implementation is complete for the standards listed below and is covered by an extensive test suite, including the jose4j test vectors.
 
 This crate contains **no cryptographic primitives of its own**. All cryptography is delegated to [aws-lc-rs] (default) or [BoringSSL] — both widely deployed, independently maintained libraries — selected by feature flag. The crate itself has not undergone an independent security audit; the code under audit would be the parsing, validation, and key-handling logic, not the crypto.
 
