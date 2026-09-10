@@ -183,3 +183,35 @@ fn rfc9964_ml_dsa_44_thumbprint() {
         "T4xl70S7MT6Zeq6r9V9fPJGVn76wfnXJ21-gyo0Gu6o"
     );
 }
+
+/// `into_public` strips the 32-byte seed (the JWK `priv` member) without a
+/// JSON round trip: the public bytes survive, `priv` is never emitted, and
+/// the result still verifies a signature made by the private key.
+#[test]
+fn into_public_strips_seed_ml_dsa_65() {
+    let mut key = MlDsaJsonWebKey::from_seed(MlDsaParameterSet::MlDsa65, [0x42u8; 32]).unwrap();
+    key.set_key_id("pq-1");
+    let public_bytes = key.public_key_bytes();
+    let signature = key.sign(b"message").unwrap();
+
+    let public = key.into_public().unwrap();
+
+    assert_eq!(public.key_id(), Some("pq-1"));
+    assert_eq!(public.alg(), Some("ML-DSA-65"));
+    assert_eq!(public.public_key_bytes(), public_bytes);
+    assert!(public.seed_bytes().is_none());
+    assert!(public.verify(b"message", &signature));
+    let json = public.to_json(OutputControlLevel::IncludePrivate);
+    assert!(!json.contains("\"priv\":"), "{json}");
+    assert!(json.contains("\"pub\":"), "{json}");
+
+    // The `JsonWebKey` facade dispatches to the same conversion.
+    let as_enum: JsonWebKey = public.into();
+    let public_again = as_enum.into_public().unwrap();
+    assert_eq!(public_again.key_type(), "AKP");
+    assert!(
+        public_again
+            .to_pem(OutputControlLevel::IncludePrivate)
+            .is_err()
+    );
+}
