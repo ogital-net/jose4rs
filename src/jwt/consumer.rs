@@ -722,8 +722,27 @@ impl JwtConsumer<'_> {
     /// Returns an error if the claims cannot be parsed or fail validation.
     pub fn process_to_claims(&self, claims: &str) -> Result<JwtClaims, InvalidJwtError> {
         let claims = JwtClaims::parse(claims)?;
+        self.validate(&claims)?;
+        Ok(claims)
+    }
+
+    /// Validate already-parsed claims without copying or reparsing them.
+    ///
+    /// Runs the same default and custom validators as
+    /// [`process_to_claims`](Self::process_to_claims), including the configured
+    /// skip flags. Useful when applying multiple validation policies to the
+    /// same claims or inspecting claims before selecting a policy.
+    ///
+    /// This validates claims only; it does not verify a JWS signature or
+    /// decrypt a JWE. Authenticate the corresponding token before trusting
+    /// these claims. Mutating claims after validation requires revalidation.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the claims fail validation.
+    pub fn validate(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
         if self.flags.contains(ValidationFlags::SKIP_ALL_VALIDATORS) {
-            return Ok(claims);
+            return Ok(());
         }
 
         let mut errors: Vec<ErrorCode> = Vec::new();
@@ -733,51 +752,40 @@ impl JwtConsumer<'_> {
             .contains(ValidationFlags::SKIP_ALL_DEFAULT_VALIDATORS)
         {
             // Validate issuer
-            if let Err(e) = self.validate_issuer(&claims) {
-                errors.extend(e.error_codes);
-            }
+            errors.extend(self.validate_issuer(claims));
 
             // Validate audience
             if !self
                 .flags
                 .contains(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION)
-                && let Err(e) = self.validate_audience(&claims)
             {
-                errors.extend(e.error_codes);
+                errors.extend(self.validate_audience(claims));
             }
 
             // Validate subject
-            if let Err(e) = self.validate_subject(&claims) {
-                errors.extend(e.error_codes);
-            }
+            errors.extend(self.validate_subject(claims));
 
             // Validate JWT ID
-            if let Err(e) = self.validate_jwt_id(&claims) {
-                errors.extend(e.error_codes);
-            }
+            errors.extend(self.validate_jwt_id(claims));
 
             // Validate prohibited claims
-            if let Err(e) = self.validate_prohibited_claims(&claims) {
-                errors.extend(e.error_codes);
-            }
+            errors.extend(self.validate_prohibited_claims(claims));
 
             // Validate time claims
-            if let Err(e) = self.validate_time_claims(&claims) {
-                errors.extend(e.error_codes);
-            }
+            self.validate_time_claims(claims, &mut errors);
         }
 
         // Custom validators run regardless of `skip_all_default_validators`;
         // only `skip_all_validators` (handled above) short-circuits past
         // them.
         for validator in &self.custom_validators {
-            if let Err(e) = validator.validate(&claims) {
+            if let Err(e) = validator.validate(claims) {
                 errors.extend(e.error_codes);
             }
         }
 
         if errors.is_empty() {
-            Ok(claims)
+            Ok(())
         } else {
             Err(InvalidJwtError::with_error_codes(
                 "JWT validation failed",
@@ -786,70 +794,53 @@ impl JwtConsumer<'_> {
         }
     }
 
-    fn validate_issuer(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+    // Built-ins only contribute codes to the final error; do not allocate
+    // temporary messages/vectors that the caller would immediately discard.
+    fn validate_issuer(&self, claims: &JwtClaims) -> Option<ErrorCode> {
+        let require_issuer = self.flags.contains(ValidationFlags::REQUIRE_ISSUER);
+        let expected_issuers = self.expected_issuers.as_deref().unwrap_or_default();
+        if !require_issuer && expected_issuers.is_empty() {
+            return None;
+        }
         let issuer = claims.issuer();
 
         // A present-but-non-string iss is malformed, not missing; reject it
         // (before the missing check, which would otherwise mask it) when the
         // caller has configured expected issuers.
-        if let Some(expected_issuers) = &self.expected_issuers
+        if issuer.is_none() && !expected_issuers.is_empty() && claims.has_claim("iss") {
+            return Some(ErrorCode::ISSUER_INVALID);
+        }
+
+        if require_issuer && issuer.is_none() {
+            return Some(ErrorCode::ISSUER_MISSING);
+        }
+
+        if let Some(issuer) = issuer
             && !expected_issuers.is_empty()
-            && claims.string_claim_is_malformed("iss")
+            && !expected_issuers.contains(&issuer)
         {
-            return Err(InvalidJwtError::with_error_code(
-                "issuer claim is malformed (must be a string)",
-                ErrorCode::ISSUER_INVALID,
-            ));
+            return Some(ErrorCode::ISSUER_INVALID);
         }
 
-        if self.flags.contains(ValidationFlags::REQUIRE_ISSUER) && issuer.is_none() {
-            return Err(InvalidJwtError::with_error_code(
-                "issuer claim is required but missing",
-                ErrorCode::ISSUER_MISSING,
-            ));
-        }
-
-        if let Some(expected_issuers) = &self.expected_issuers {
-            if let Some(issuer) = issuer {
-                if !expected_issuers.is_empty() && !expected_issuers.contains(&issuer) {
-                    return Err(InvalidJwtError::with_error_code(
-                        format!("issuer '{issuer}' is not expected"),
-                        ErrorCode::ISSUER_INVALID,
-                    ));
-                }
-            } else if self.flags.contains(ValidationFlags::REQUIRE_ISSUER) {
-                return Err(InvalidJwtError::with_error_code(
-                    "issuer claim is required but missing",
-                    ErrorCode::ISSUER_MISSING,
-                ));
-            }
-        }
-
-        Ok(())
+        None
     }
 
-    fn validate_audience(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+    fn validate_audience(&self, claims: &JwtClaims) -> Option<ErrorCode> {
         // Read the aud claim exactly once: presence, well-formedness, strict
         // string form, and the string values all come from a single lookup.
-        let aud = claims.audience_info();
+        let aud = claims.audience_info(self.expected_audiences.as_deref().unwrap_or_default());
 
         // A present-but-malformed aud (non-string member, or not a string/array)
         // is rejected outright rather than silently filtered (RFC 7519
         // requires the claim shape to be honoured).
         if aud.malformed {
-            return Err(InvalidJwtError::with_error_code(
-                "audience claim is malformed (must be a string or an array of strings)",
-                ErrorCode::AUDIENCE_INVALID,
-            ));
+            return Some(ErrorCode::AUDIENCE_INVALID);
         }
 
         let has_aud = aud.present;
 
         if self.flags.contains(ValidationFlags::REQUIRE_AUDIENCE) && !has_aud {
-            return Err(InvalidJwtError::with_error_code(
-                "audience claim is required but missing",
-                ErrorCode::AUDIENCE_MISSING,
-            ));
+            return Some(ErrorCode::AUDIENCE_MISSING);
         }
 
         if let Some(expected_audiences) = &self.expected_audiences {
@@ -857,103 +848,89 @@ impl JwtConsumer<'_> {
                 // Strict mode (RFC 7523 client assertions) requires the raw aud
                 // to be a single string, not an array.
                 if self.flags.contains(ValidationFlags::STRICT_AUDIENCE) && !aud.is_string {
-                    return Err(InvalidJwtError::with_error_code(
-                        "audience must be a single string value in strict mode",
-                        ErrorCode::AUDIENCE_INVALID,
-                    ));
+                    return Some(ErrorCode::AUDIENCE_INVALID);
                 }
 
-                let matches = aud.values.iter().any(|a| expected_audiences.contains(a));
-                if !expected_audiences.is_empty() && !matches {
-                    return Err(InvalidJwtError::with_error_code(
-                        "no expected audience found in JWT",
-                        ErrorCode::AUDIENCE_INVALID,
-                    ));
+                if !expected_audiences.is_empty() && !aud.matches_expected {
+                    return Some(ErrorCode::AUDIENCE_INVALID);
                 }
-            } else if self.flags.contains(ValidationFlags::REQUIRE_AUDIENCE) {
-                return Err(InvalidJwtError::with_error_code(
-                    "audience claim is required but missing",
-                    ErrorCode::AUDIENCE_MISSING,
-                ));
             }
-        } else if !self
-            .flags
-            .contains(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION)
-            && has_aud
-        {
-            return Err(InvalidJwtError::with_error_code(
-                "no expected audience has been configured",
-                ErrorCode::AUDIENCE_MISSING,
-            ));
+        } else if has_aud {
+            return Some(ErrorCode::AUDIENCE_MISSING);
         }
 
-        Ok(())
+        None
     }
 
-    fn validate_subject(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+    fn validate_subject(&self, claims: &JwtClaims) -> Option<ErrorCode> {
+        if !self.flags.contains(ValidationFlags::REQUIRE_SUBJECT) && self.expected_subject.is_none()
+        {
+            return None;
+        }
         let subject = claims.subject();
 
         if self.flags.contains(ValidationFlags::REQUIRE_SUBJECT) && subject.is_none() {
-            return Err(InvalidJwtError::with_error_code(
-                "subject claim is required but missing",
-                ErrorCode::SUBJECT_MISSING,
-            ));
+            return Some(ErrorCode::SUBJECT_MISSING);
         }
 
         if let Some(expected_subject) = &self.expected_subject {
             if let Some(subject) = subject {
                 if subject != *expected_subject {
-                    return Err(InvalidJwtError::with_error_code(
-                        format!("subject '{subject}' does not match expected '{expected_subject}'"),
-                        ErrorCode::SUBJECT_INVALID,
-                    ));
+                    return Some(ErrorCode::SUBJECT_INVALID);
                 }
             } else {
-                return Err(InvalidJwtError::with_error_code(
-                    "subject claim is required but missing",
-                    ErrorCode::SUBJECT_MISSING,
-                ));
+                return Some(ErrorCode::SUBJECT_MISSING);
             }
         }
 
-        Ok(())
+        None
     }
 
-    fn validate_jwt_id(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+    fn validate_jwt_id(&self, claims: &JwtClaims) -> Option<ErrorCode> {
         if self.flags.contains(ValidationFlags::REQUIRE_JWT_ID) && claims.jwt_id().is_none() {
-            return Err(InvalidJwtError::with_error_code(
-                "JWT ID claim is required but missing",
-                ErrorCode::JWT_ID_MISSING,
-            ));
+            return Some(ErrorCode::JWT_ID_MISSING);
         }
-        Ok(())
+        None
     }
 
-    fn validate_prohibited_claims(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
-        // Short-circuit before allocating: the common case (no prohibited
-        // claim present) does zero heap work.
-        if !self
-            .prohibited_claims
+    fn validate_prohibited_claims(&self, claims: &JwtClaims) -> Option<ErrorCode> {
+        self.prohibited_claims
             .iter()
             .any(|name| claims.has_claim(name))
-        {
-            return Ok(());
-        }
-        // Error path only: name the offending claims. The second scan is
-        // fine -- we only reach here when validation is failing anyway.
-        let present: Vec<&str> = self
-            .prohibited_claims
-            .iter()
-            .filter(|name| claims.has_claim(name))
-            .copied()
-            .collect();
-        Err(InvalidJwtError::with_error_code(
-            format!("JWT has prohibited claims: {}", present.join(", ")),
-            ErrorCode::PROHIBITED_CLAIM,
-        ))
+            .then_some(ErrorCode::PROHIBITED_CLAIM)
     }
 
-    fn validate_time_claims(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+    fn validate_time_claims(&self, claims: &JwtClaims, errors: &mut Vec<ErrorCode>) {
+        // Read each time claim exactly once: a single map lookup per claim both
+        // classifies it (absent / malformed / integer) and yields the value.
+        let exp = claims.time_claim("exp");
+        let nbf = claims.time_claim("nbf");
+        let iat = claims.time_claim("iat");
+
+        // No comparisons require the wall clock when all time claims are
+        // absent. Still enforce required claims, in the usual error order.
+        if [exp, nbf, iat] == [TimeClaim::Absent; 3] {
+            for (flag, code) in [
+                (
+                    ValidationFlags::REQUIRE_EXPIRATION,
+                    ErrorCode::EXPIRATION_MISSING,
+                ),
+                (
+                    ValidationFlags::REQUIRE_NOT_BEFORE,
+                    ErrorCode::NOT_BEFORE_MISSING,
+                ),
+                (
+                    ValidationFlags::REQUIRE_ISSUED_AT,
+                    ErrorCode::ISSUED_AT_MISSING,
+                ),
+            ] {
+                if self.flags.contains(flag) {
+                    errors.push(code);
+                }
+            }
+            return;
+        }
+
         let eval_time = self.evaluation_time.unwrap_or_else(SystemTime::now);
         // Signed seconds since the epoch; negative for pre-epoch times so the
         // claim comparisons (all in i64) work for any evaluation time.
@@ -962,14 +939,6 @@ impl JwtConsumer<'_> {
             Err(e) => -(e.duration().as_secs() as i64),
         };
         let clock_skew_secs = self.allowed_clock_skew.as_secs() as i64;
-
-        // Read each time claim exactly once: a single map lookup per claim both
-        // classifies it (absent / malformed / integer) and yields the value.
-        let exp = claims.time_claim("exp");
-        let nbf = claims.time_claim("nbf");
-        let iat = claims.time_claim("iat");
-
-        let mut errors = Vec::new();
 
         // A present-but-non-integer NumericDate (float, string, out-of-range)
         // is malformed, not absent (RFC 7519 Section 2).
@@ -1071,15 +1040,6 @@ impl JwtConsumer<'_> {
             && iat == TimeClaim::Absent
         {
             errors.push(ErrorCode::ISSUED_AT_MISSING);
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(InvalidJwtError::with_error_codes(
-                "time-based validation failed",
-                errors,
-            ))
         }
     }
 }

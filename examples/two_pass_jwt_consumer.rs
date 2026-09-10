@@ -36,28 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jwt = jws.compact_serialization(&rsa_json_web_key)?;
     println!("JWT: {jwt}");
 
-    // --- First pass: parse without verifying ---
-
-    // The first pass is basically just used to parse the JWT and read the
-    // claims, without checking signatures or doing any validation.
-    let first_pass = JsonWebSignature::from_compact_serialization(&jwt)?;
-    let unverified_claims_json = String::from_utf8(first_pass.unverified_payload()?.to_vec())?;
-
-    // From the unverified claims we can get the issuer, or whatever else we
-    // might need, to lookup or figure out the kind of validation policy to
-    // apply.
-    let issuer = JwtClaims::parse(&unverified_claims_json)?
-        .issuer()
-        .map(str::to_owned)
-        .ok_or("missing iss claim")?;
-    println!("First pass found issuer: {issuer}");
-
-    // Just using the same key here but you might, for example, have JWKS URIs
-    // configured for each issuer, which you'd use to resolve the verification
-    // key.
-    let verification_key = &rsa_json_web_key;
-
-    // Set up the allowed/expected algorithms.
+    // Set up the allowed/expected algorithms independently of token claims.
     let algorithm_constraints = AlgorithmConstraints::new(
         ConstraintType::Permit,
         [
@@ -66,29 +45,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     );
 
+    // --- First pass: parse without verifying ---
+
+    // The first pass is basically just used to parse the JWT and read the
+    // claims, without checking signatures or doing any validation.
+    let mut received_jws = JsonWebSignature::from_compact_serialization(&jwt)?;
+    received_jws.set_algorithm_constraints(&algorithm_constraints);
+    let parsed_claims = JwtClaims::parse(received_jws.unverified_payload()?)?;
+
+    // From the unverified claims we can get the issuer, or whatever else we
+    // might need, to lookup or figure out the kind of validation policy to
+    // apply.
+    let issuer = parsed_claims.issuer().ok_or("missing iss claim")?;
+    println!("First pass found issuer: {issuer}");
+
+    // Just using the same key here but you might, for example, have JWKS URIs
+    // configured for each issuer, which you'd use to resolve the verification
+    // key. Only use trusted issuer-to-key mappings, not a URI supplied by the
+    // token itself.
+    let verification_key = &rsa_json_web_key;
+
     // --- Second pass: verify and validate ---
 
-    // Using info from the first pass, verify the signature.
-    let mut second_pass_jws = JsonWebSignature::new();
-    second_pass_jws.set_algorithm_constraints(&algorithm_constraints);
-    second_pass_jws.set_compact_serialization(&jwt)?;
-    if !second_pass_jws.verify_signature(verification_key)? {
+    // Verify the SAME JWS whose unchanged payload we parsed above. The claims
+    // are not trusted until this succeeds; neither JWS nor JSON needs reparsing.
+    if !received_jws.verify_signature(verification_key)? {
         return Err("invalid JWS signature".into());
     }
-    let verified_claims_json =
-        String::from_utf8(second_pass_jws.payload(verification_key)?.to_vec())?;
 
     // And validate the claims.
     let second_pass_consumer = JwtConsumerBuilder::new()
-        .set_expected_issuer(&issuer)
+        .set_expected_issuer(issuer)
         .set_require_expiration_time()
         .set_allowed_clock_skew(Duration::from_secs(30))
         .set_require_subject()
         .set_expected_audience(true, false, &["Audience"])
         .build();
 
-    match second_pass_consumer.process_to_claims(&verified_claims_json) {
-        Ok(jwt_claims) => println!("Second pass validation succeeded! {}", jwt_claims.to_json()),
+    match second_pass_consumer.validate(&parsed_claims) {
+        Ok(()) => println!(
+            "Second pass validation succeeded! {}",
+            parsed_claims.to_json()
+        ),
         Err(e) => println!("Invalid JWT! {e}"),
     }
 

@@ -7,6 +7,241 @@ mod jwt_consumer_tests {
     use crate::jwt::consumer::ErrorCode;
     use crate::jwt::{InvalidJwtError, JwtClaims, JwtConsumerBuilder};
 
+    /// Exercise both parsed (borrowed DOM) and constructed/mutated (owned DOM)
+    /// claims, since the internal accessors dispatch to different value types.
+    fn claim_representations(json: &str) -> [JwtClaims; 2] {
+        let parsed = JwtClaims::parse(json).unwrap();
+        let mut owned = parsed.clone();
+        owned.set_string_claim("test_marker", "owned").unwrap();
+        [parsed, owned]
+    }
+
+    #[test]
+    fn validate_parsed_claims_without_modifying_them() {
+        let json = r#"{"iss":"issuer","aud":"audience","sub":"subject","exp":200}"#;
+        let consumer = JwtConsumerBuilder::new()
+            .set_expected_issuer("issuer")
+            .set_expected_audience(true, false, &["audience"])
+            .set_expected_subject("subject")
+            .set_require_expiration_time()
+            .set_evaluation_time_from_seconds(100)
+            .register_validator(|claims: &JwtClaims| {
+                assert_eq!(claims.subject(), Some("subject"));
+                Ok(())
+            })
+            .build();
+
+        for mut claims in claim_representations(json) {
+            let before = claims.to_json();
+            consumer.validate(&claims).unwrap();
+            assert_eq!(claims.to_json(), before);
+            // No cached validation result survives mutation.
+            claims.set_issuer("wrong");
+            assert_eq!(
+                consumer.validate(&claims).unwrap_err().error_codes(),
+                &[ErrorCode::ISSUER_INVALID],
+            );
+        }
+    }
+
+    #[test]
+    fn audience_matching_still_checks_every_element_type() {
+        for json in [
+            r#"{"aud":["expected",123]}"#,
+            r#"{"aud":["expected",null]}"#,
+            r#"{"aud":["expected",{}]}"#,
+            r#"{"aud":["expected",[]]}"#,
+            r#"{"aud":[false,"expected"]}"#,
+        ] {
+            for claims in claim_representations(json) {
+                // Empty expectations must not disable shape validation.
+                for expected in [&["expected"][..], &[][..]] {
+                    let consumer = JwtConsumerBuilder::new()
+                        .set_expected_audience(false, false, expected)
+                        .build();
+                    assert_eq!(
+                        consumer.validate(&claims).unwrap_err().error_codes(),
+                        &[ErrorCode::AUDIENCE_INVALID],
+                        "{json}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn empty_audience_expectations_preserve_presence_and_strict_checks() {
+        for json in ["{}", r#"{"aud":null}"#, r#"{"aud":[]}"#, r#"{"aud":"any"}"#] {
+            for claims in claim_representations(json) {
+                let optional = JwtConsumerBuilder::new()
+                    .set_expected_audience(false, false, &[])
+                    .build();
+                optional.validate(&claims).unwrap();
+                let strict = JwtConsumerBuilder::new()
+                    .set_expected_audience(true, true, &[])
+                    .build();
+                let result = strict.validate(&claims);
+                if json == r#"{"aud":"any"}"# {
+                    result.unwrap();
+                } else {
+                    let expected = if json == r#"{"aud":[]}"# {
+                        ErrorCode::AUDIENCE_INVALID
+                    } else {
+                        ErrorCode::AUDIENCE_MISSING
+                    };
+                    assert_eq!(result.unwrap_err().error_codes(), &[expected]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn issuer_fast_path_preserves_empty_expectations() {
+        for json in ["{}", r#"{"iss":null}"#, r#"{"iss":123}"#] {
+            for claims in claim_representations(json) {
+                let optional = JwtConsumerBuilder::new()
+                    .set_expected_issuers(false, &[])
+                    .build();
+                optional.validate(&claims).unwrap();
+                let required = JwtConsumerBuilder::new()
+                    .set_expected_issuers(true, &[])
+                    .build();
+                assert_eq!(
+                    required.validate(&claims).unwrap_err().error_codes(),
+                    &[ErrorCode::ISSUER_MISSING],
+                );
+                let expected = JwtConsumerBuilder::new()
+                    .set_expected_issuer("issuer")
+                    .build();
+                let code = if json == "{}" {
+                    ErrorCode::ISSUER_MISSING
+                } else {
+                    ErrorCode::ISSUER_INVALID
+                };
+                assert_eq!(
+                    expected.validate(&claims).unwrap_err().error_codes(),
+                    &[code]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validation_preserves_error_order_and_duplicates() {
+        const CUSTOM: ErrorCode = ErrorCode::custom(-6001);
+        let json = r#"{"iss":"wrong","aud":"wrong","sub":"wrong","exp":1,"nbf":200,"iat":300,"forbidden":true}"#;
+        let consumer = JwtConsumerBuilder::new()
+            .set_expected_issuer("issuer")
+            .set_expected_audience(true, false, &["audience"])
+            .set_expected_subject("subject")
+            .set_require_jwt_id()
+            .set_prohibited_claims(&["forbidden", "iss"])
+            .set_evaluation_time_from_seconds(100)
+            .set_issued_at_restrictions(0, 0)
+            .register_validator(|_: &JwtClaims| {
+                Err(InvalidJwtError::with_error_codes(
+                    "custom",
+                    [CUSTOM, CUSTOM],
+                ))
+            })
+            .build();
+        let expected = [
+            ErrorCode::ISSUER_INVALID,
+            ErrorCode::AUDIENCE_INVALID,
+            ErrorCode::SUBJECT_INVALID,
+            ErrorCode::JWT_ID_MISSING,
+            ErrorCode::PROHIBITED_CLAIM,
+            ErrorCode::EXPIRED,
+            ErrorCode::EXPIRATION_BEFORE_ISSUED_AT,
+            ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE,
+            ErrorCode::NOT_YET_VALID,
+            ErrorCode::ISSUED_AT_INVALID_FUTURE,
+            CUSTOM,
+            CUSTOM,
+        ];
+        assert_eq!(
+            consumer.process_to_claims(json).unwrap_err().error_codes(),
+            &expected
+        );
+        for claims in claim_representations(json) {
+            let error = consumer.validate(&claims).unwrap_err();
+            assert_eq!(error.message(), "JWT validation failed");
+            assert_eq!(error.error_codes(), &expected);
+        }
+    }
+
+    #[test]
+    fn absent_and_malformed_time_claims_preserve_codes() {
+        let consumer = JwtConsumerBuilder::new()
+            .set_require_expiration_time()
+            .set_require_not_before()
+            .set_require_issued_at()
+            .build();
+        for (json, expected) in [
+            (
+                "{}",
+                [
+                    ErrorCode::EXPIRATION_MISSING,
+                    ErrorCode::NOT_BEFORE_MISSING,
+                    ErrorCode::ISSUED_AT_MISSING,
+                ],
+            ),
+            (
+                r#"{"exp":null,"nbf":false,"iat":"bad"}"#,
+                [ErrorCode::MALFORMED_CLAIM; 3],
+            ),
+        ] {
+            for claims in claim_representations(json) {
+                assert_eq!(
+                    consumer.validate(&claims).unwrap_err().error_codes(),
+                    &expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validate_parsed_claims_honors_skip_flags() {
+        const CUSTOM: ErrorCode = ErrorCode::custom(-6002);
+        let claims = JwtClaims::parse(r#"{"iss":"wrong","aud":123,"exp":0}"#).unwrap();
+        let skip_defaults = JwtConsumerBuilder::new()
+            .set_expected_issuer("issuer")
+            .set_skip_all_default_validators()
+            .register_validator(|_: &JwtClaims| {
+                Err(InvalidJwtError::with_error_code("custom", CUSTOM))
+            })
+            .build();
+        assert_eq!(
+            skip_defaults.validate(&claims).unwrap_err().error_codes(),
+            &[CUSTOM]
+        );
+
+        let skip_all = JwtConsumerBuilder::new()
+            .set_skip_all_validators()
+            .register_validator(|_: &JwtClaims| -> Result<(), InvalidJwtError> {
+                panic!("custom validator must be skipped")
+            })
+            .build();
+        skip_all.validate(&claims).unwrap();
+        // Skipping validators never bypasses JSON parsing.
+        assert!(
+            skip_all
+                .process_to_claims("not JSON")
+                .unwrap_err()
+                .has_error_code(ErrorCode::JSON_INVALID)
+        );
+
+        let skip_audience = JwtConsumerBuilder::new()
+            .set_skip_default_audience_validation()
+            .set_expected_issuer("issuer")
+            .set_evaluation_time_from_seconds(100)
+            .build();
+        assert_eq!(
+            skip_audience.validate(&claims).unwrap_err().error_codes(),
+            &[ErrorCode::ISSUER_INVALID, ErrorCode::EXPIRED],
+        );
+    }
+
     /// Test basic audience validation with single value
     #[test]
     fn some_basic_aud_checks() {

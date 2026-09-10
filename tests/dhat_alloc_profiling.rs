@@ -371,6 +371,46 @@ fn profile_jwt_consumer_validate() {
 }
 
 #[test]
+fn profile_jwt_consumer_validate_parsed() {
+    let (_lock, _profiler) = testing_profiler();
+    let consumer = JwtConsumerBuilder::new()
+        .set_expected_issuer("issuer")
+        .set_expected_audience(true, false, &["audience"])
+        .set_expected_subject("subject")
+        .set_require_jwt_id()
+        .set_prohibited_claims(&["forbidden"])
+        .set_require_expiration_time()
+        .set_require_not_before()
+        .set_require_issued_at()
+        .set_evaluation_time_from_seconds(100)
+        .build();
+    for json in [
+        r#"{"iss":"issuer","aud":"audience","sub":"subject","jti":"id","exp":200,"nbf":1,"iat":1}"#,
+        r#"{"iss":"issuer","aud":["other","audience"],"sub":"subject","jti":"id","exp":200,"nbf":1,"iat":1}"#,
+    ] {
+        let parsed = JwtClaims::parse(json).unwrap();
+        let mut owned = parsed.clone();
+        owned.set_string_claim("extra", "owned").unwrap();
+        for claims in [&parsed, &owned] {
+            let before = dhat::HeapStats::get();
+            for _ in 0..100 {
+                consumer.validate(std::hint::black_box(claims)).unwrap();
+            }
+            let after = dhat::HeapStats::get();
+            // The global allocator also counts unrelated test-harness work.
+            // Leave small headroom for it; a per-validation allocation would
+            // add at least 100 blocks and fail this bound.
+            let blocks = after.total_blocks - before.total_blocks;
+            println!("--- dhat: 100 parsed validations: {blocks} blocks ---");
+            assert!(
+                blocks < 10,
+                "validation unexpectedly allocated {blocks} blocks"
+            );
+        }
+    }
+}
+
+#[test]
 fn profile_jwt_to_json() {
     let (_lock, _profiler) = testing_profiler();
 

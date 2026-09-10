@@ -48,17 +48,17 @@ pub(crate) enum TimeClaim {
 
 /// A single-lookup snapshot of the `aud` claim, capturing everything the
 /// consumer's audience validation needs without re-querying the claims map.
-/// Borrows the claim strings from the claims value (no allocation).
+/// Checks membership directly against borrowed strings (no allocation).
 #[derive(Debug, Default)]
-pub(crate) struct AudienceInfo<'a> {
+pub(crate) struct AudienceInfo {
     /// Present and not JSON null (null is treated as absent, matching jose4j).
     pub present: bool,
     /// Present but neither a string nor an all-string array.
     pub malformed: bool,
     /// Present as a plain JSON string (the RFC 7523 strict form).
     pub is_string: bool,
-    /// The borrowed string values (empty unless well-formed).
-    pub values: Vec<&'a str>,
+    /// At least one string matches a configured expected audience.
+    pub matches_expected: bool,
 }
 
 /// Dispatch a read-only operation to the inner value regardless of variant.
@@ -226,16 +226,6 @@ impl JwtClaims {
     /// The issuer value if present, `None` otherwise.
     pub fn issuer(&self) -> Option<&str> {
         with_value!(self, |v| v.get_str(ISSUER))
-    }
-
-    /// Returns `true` if the named claim is present but not a JSON string
-    /// (e.g. a number, object, array, or bool). Used to reject malformed
-    /// string-typed claims rather than silently skipping their validation.
-    pub(crate) fn string_claim_is_malformed(&self, name: &str) -> bool {
-        with_value!(self, |v| match v.get(name) {
-            None => false,
-            Some(val) => val.as_str().is_none(),
-        })
     }
 
     /// Sets the issuer (`iss`) claim.
@@ -600,10 +590,9 @@ impl JwtClaims {
     }
 
     /// Reads the `aud` claim once and returns a full classification (presence,
-    /// well-formedness, strict-string form, and the string values) so the
+    /// well-formedness, strict-string form, and expected-audience match) so the
     /// consumer performs a single map lookup for all of its audience checks.
-    /// The returned string slices borrow from the claims value.
-    pub(crate) fn audience_info(&self) -> AudienceInfo<'_> {
+    pub(crate) fn audience_info(&self, expected: &[&str]) -> AudienceInfo {
         with_value!(self, |v| {
             let Some(aud) = v.get(AUDIENCE) else {
                 return AudienceInfo::default();
@@ -617,29 +606,32 @@ impl JwtClaims {
                     present: true,
                     malformed: false,
                     is_string: true,
-                    values: vec![s],
+                    matches_expected: expected.contains(&s),
                 };
             }
             match aud.as_array() {
                 Some(arr) => {
-                    let malformed = arr.iter().any(|el| el.as_str().is_none());
-                    AudienceInfo {
+                    let mut info = AudienceInfo {
                         present: true,
-                        malformed,
-                        is_string: false,
-                        values: if malformed {
-                            Vec::new()
-                        } else {
-                            arr.iter().filter_map(|el| el.as_str()).collect()
-                        },
+                        ..AudienceInfo::default()
+                    };
+                    for el in arr {
+                        let Some(s) = el.as_str() else {
+                            info.malformed = true;
+                            break;
+                        };
+                        // Stop membership checks after a match, but keep type
+                        // checking: ["expected", 123] must still be rejected.
+                        info.matches_expected = info.matches_expected || expected.contains(&s);
                     }
+                    info
                 }
                 // A non-string, non-array aud (number/object/bool) is malformed.
                 None => AudienceInfo {
                     present: true,
                     malformed: true,
                     is_string: false,
-                    values: Vec::new(),
+                    matches_expected: false,
                 },
             }
         })
