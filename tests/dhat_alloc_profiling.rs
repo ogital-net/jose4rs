@@ -270,21 +270,36 @@ fn profile_jwt_claims_parse_only() {
         stats_after.total_bytes,
         stats_before.total_bytes,
     );
+    // `curr_*` is a live-allocation watermark, not a cumulative counter:
+    // unrelated allocations by other test threads can push it either way
+    // between reads (on CI a background alloc made `stats_before` higher than
+    // `stats_after`, and the debug build's subtraction overflowed). These are
+    // diagnostics only, so saturate instead of panicking -- same reasoning as
+    // in `profile_jwt_audience_call` below. (`total_*` counters are
+    // cumulative and monotonic, so the subtractions above are safe.)
     println!(
         "  live blocks after parse: {}",
-        stats_after.curr_blocks - stats_before.curr_blocks
+        stats_after
+            .curr_blocks
+            .saturating_sub(stats_before.curr_blocks)
     );
     println!(
         "  live bytes after parse:  {}",
-        stats_after.curr_bytes - stats_before.curr_bytes
+        stats_after
+            .curr_bytes
+            .saturating_sub(stats_before.curr_bytes)
     );
 
     drop(parsed);
     let stats_dropped = dhat::HeapStats::get();
     println!(
         "  freed by drop: {} blocks, {} bytes",
-        stats_after.curr_blocks - stats_dropped.curr_blocks + stats_before.curr_blocks,
-        stats_after.curr_bytes - stats_dropped.curr_bytes + stats_before.curr_bytes,
+        stats_after
+            .curr_blocks
+            .saturating_sub(stats_dropped.curr_blocks),
+        stats_after
+            .curr_bytes
+            .saturating_sub(stats_dropped.curr_bytes),
     );
 }
 
