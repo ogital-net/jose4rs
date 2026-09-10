@@ -485,6 +485,38 @@ impl JsonWebKey {
         Self::from_evp_pkey(pkey)
     }
 
+    /// Consumes the key and returns a new key holding only its public
+    /// components, without a JSON or DER serialization round trip.
+    ///
+    /// All metadata (`alg`, `use`, `kid`, `x5t`, `x5t#S256`) is preserved. The
+    /// private material exists only in the consumed key, which is dropped when
+    /// this method returns; the returned key can verify signatures but cannot
+    /// sign or decrypt. This is the preferred alternative to
+    /// `to_json(OutputControlLevel::PublicOnly)` + [`JsonWebKey::from_json`]
+    /// when the goal is an in-memory public-only key.
+    ///
+    /// `Clone` on a JWK shares the backend key by reference count, so if this
+    /// key was cloned beforehand, the private material remains alive in those
+    /// clones until they drop as well.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JoseError::InvalidKey`] for symmetric `oct` keys, which are
+    /// entirely secret and have no public component (the consumed key is
+    /// dropped), or if the crypto backend rejects the public components.
+    pub fn into_public(self) -> Result<Self, JoseError> {
+        match self {
+            JsonWebKey::EllipticCurve(key) => Ok(Self::EllipticCurve(key.into_public()?)),
+            JsonWebKey::OctetKeyPair(key) => Ok(Self::OctetKeyPair(key.into_public()?)),
+            JsonWebKey::Rsa(key) => Ok(Self::Rsa(key.into_public()?)),
+            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+            JsonWebKey::MlDsa(key) => Ok(Self::MlDsa(key.into_public()?)),
+            JsonWebKey::Oct(_) => Err(JoseError::InvalidKey(
+                "symmetric 'oct' keys have no public component".into(),
+            )),
+        }
+    }
+
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     pub fn to_json(&self, level: OutputControlLevel) -> String {
         match self {
@@ -1659,5 +1691,112 @@ mod tests {
         // Exact 32-byte coordinate (a valid on-curve point) parses fine.
         let valid = r#"{"kty":"EC","crv":"P-256","x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4","y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}"#;
         assert!(JsonWebKey::from_json(valid).is_ok());
+    }
+
+    /// `into_public` strips RSA private material without a JSON round trip:
+    /// the result verifies but holds no `d`/CRT members even at
+    /// `IncludePrivate`, and keeps the metadata.
+    #[test]
+    fn test_into_public_rsa() {
+        let rsa = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::RsaUsingSha256)
+            .generate()
+            .unwrap();
+        let JsonWebKey::Rsa(mut rsa) = rsa else {
+            panic!("expected an RSA key");
+        };
+        rsa.set_key_id("rsa-1");
+        rsa.set_key_use(KeyUse::Signature);
+        let public_json_before = rsa.to_json(OutputControlLevel::PublicOnly);
+        let signature = rsa.sign(b"message", crate::crypto::DigestAlgorithm::Sha256);
+
+        let public = rsa.into_public().unwrap();
+
+        // Metadata and the public components survive.
+        assert_eq!(public.key_id(), Some("rsa-1"));
+        assert_eq!(public.key_use(), Some(KeyUse::Signature));
+        assert_eq!(public.alg(), Some("RS256"));
+        assert_eq!(
+            public.to_json(OutputControlLevel::PublicOnly),
+            public_json_before
+        );
+        // Even when asked, there is no private material to emit.
+        let json = public.to_json(OutputControlLevel::IncludePrivate);
+        assert!(json.contains("\"n\":"), "{json}");
+        for member in [
+            "\"d\":", "\"p\":", "\"q\":", "\"dp\":", "\"dq\":", "\"qi\":",
+        ] {
+            assert!(!json.contains(member), "{json} must not contain {member}");
+        }
+        assert!(public.to_pem(OutputControlLevel::IncludePrivate).is_err());
+        // The public key still verifies a signature made by the private key.
+        assert!(public.verify(
+            b"message",
+            crate::crypto::DigestAlgorithm::Sha256,
+            &signature
+        ));
+        assert!(format!("{public:?}").contains("private: Some(false)"));
+    }
+
+    /// Same contract for EC: the public point is preserved, `d` is gone, and
+    /// verification still works.
+    #[test]
+    fn test_into_public_ec() {
+        let ec =
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256)
+                .generate()
+                .unwrap();
+        let JsonWebKey::EllipticCurve(ec) = ec else {
+            panic!("expected an EC key");
+        };
+        let public_json_before = ec.to_json(OutputControlLevel::PublicOnly);
+        let signature = ec.sign(b"message", crate::crypto::DigestAlgorithm::Sha256);
+
+        let public = ec.into_public().unwrap();
+
+        assert_eq!(public.curve_name(), "P-256");
+        assert_eq!(public.alg(), Some("ES256"));
+        assert_eq!(
+            public.to_json(OutputControlLevel::PublicOnly),
+            public_json_before
+        );
+        assert!(
+            !public
+                .to_json(OutputControlLevel::IncludePrivate)
+                .contains("\"d\":")
+        );
+        assert!(public.to_pem(OutputControlLevel::IncludePrivate).is_err());
+        assert!(public.verify(
+            b"message",
+            crate::crypto::DigestAlgorithm::Sha256,
+            &signature
+        ));
+        assert!(format!("{public:?}").contains("private: Some(false)"));
+    }
+
+    /// `into_public` on an already-public key rebuilds an equivalent key.
+    #[test]
+    fn test_into_public_already_public() {
+        let key = JsonWebKey::from_json(
+            r#"{"kty":"EC","crv":"P-256","x":"amuk6RkDZi-48mKrzgBN_zUZ_9qupIwTZHJjM03qL-4","y":"ZOESj6_dpPiZZR-fJ-XVszQta28Cjgti7JudooQJ0co"}"#,
+        )
+        .unwrap();
+        let json_before = key.to_json(OutputControlLevel::PublicOnly);
+        let spki_before = key.to_spki_der();
+
+        let public = key.into_public().unwrap();
+
+        assert_eq!(public.to_json(OutputControlLevel::PublicOnly), json_before);
+        assert_eq!(public.to_spki_der(), spki_before);
+    }
+
+    /// Symmetric `oct` keys are entirely secret: `into_public` rejects them
+    /// rather than returning a key that still holds the shared secret.
+    #[test]
+    fn test_into_public_oct_rejected() {
+        let oct = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A128Kw)
+            .generate()
+            .unwrap();
+        let err = oct.into_public().unwrap_err();
+        assert!(matches!(err, JoseError::InvalidKey(_)), "{err:?}");
     }
 }

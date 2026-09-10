@@ -215,6 +215,51 @@ impl RsaJsonWebKey {
         self.x5t_s256.as_deref()
     }
 
+    /// Consumes the key and returns a new key holding only its public
+    /// components (`n` and `e`), without a JSON or DER serialization round
+    /// trip.
+    ///
+    /// The returned key keeps all metadata (`alg`, `use`, `kid`, `x5t`,
+    /// `x5t#S256`) but can only verify signatures and encrypt; the private
+    /// exponent and CRT parameters exist only in the consumed key, which is
+    /// freed when this method returns.
+    ///
+    /// `Clone` on a JWK shares the backend key by reference count, so if this
+    /// key was cloned beforehand, the private material remains alive in those
+    /// clones until they drop as well.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key is missing its modulus or public exponent,
+    /// or the crypto backend rejects the public components.
+    pub fn into_public(self) -> Result<Self, JoseError> {
+        // `rsa` is a borrowed view of the consumed key (`ManuallyDrop`), so it
+        // frees nothing when it goes out of scope; `to_owned_bignum` copies
+        // the public components out of it.
+        let rsa = self
+            .evp_pkey
+            .rsa()
+            .ok_or_else(|| JoseError::InvalidKey("underlying key is not an RSA key".into()))?;
+        let n = rsa
+            .n()
+            .ok_or_else(|| JoseError::InvalidKey("RSA key is missing its modulus".into()))?
+            .to_owned_bignum();
+        let e = rsa
+            .e()
+            .ok_or_else(|| JoseError::InvalidKey("RSA key is missing its public exponent".into()))?
+            .to_owned_bignum();
+        let mut public_rsa = Rsa::new();
+        public_rsa.set_key(n, e, None)?;
+        Ok(Self {
+            evp_pkey: EvpPkey::from_rsa(public_rsa),
+            alg: self.alg,
+            key_use: self.key_use,
+            key_id: self.key_id,
+            x5t: self.x5t,
+            x5t_s256: self.x5t_s256,
+        })
+    }
+
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     ///
     /// Private CRT parameters are only included for

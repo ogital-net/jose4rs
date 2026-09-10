@@ -210,6 +210,46 @@ impl EcJsonWebKey {
         self.x5t_s256.as_deref()
     }
 
+    /// Consumes the key and returns a new key holding only its public
+    /// components, without a JSON or DER serialization round trip.
+    ///
+    /// The returned key keeps all metadata (`alg`, `use`, `kid`, `x5t`,
+    /// `x5t#S256`) but contains only the public point: it can verify
+    /// signatures but not create them. The private scalar exists only in the
+    /// consumed key, which is freed when this method returns.
+    ///
+    /// `Clone` on a JWK shares the backend key by reference count, so if this
+    /// key was cloned beforehand, the private material remains alive in those
+    /// clones until they drop as well.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the crypto backend rejects the public point (not
+    /// expected for keys built through this crate's validating constructors).
+    pub fn into_public(self) -> Result<Self, JoseError> {
+        let curve = self
+            .evp_pkey
+            .get_ec_curve()
+            .ok_or_else(|| JoseError::InvalidKey("underlying key is not an EC key".into()))?;
+        let ec = self
+            .evp_pkey
+            .ec()
+            .ok_or_else(|| JoseError::InvalidKey("underlying key is not an EC key".into()))?;
+        // Owned copies of the public coordinates. `set_pub_key` rejects
+        // off-curve and infinity points, so the result is a validated key.
+        let (x, y) = ec.pub_key_affine();
+        let mut public_key = EcKey::new(curve);
+        public_key.set_pub_key(x, y)?;
+        Ok(Self {
+            evp_pkey: EvpPkey::from_ec_key(public_key),
+            alg: self.alg,
+            key_use: self.key_use,
+            key_id: self.key_id,
+            x5t: self.x5t,
+            x5t_s256: self.x5t_s256,
+        })
+    }
+
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     ///
     /// # Panics

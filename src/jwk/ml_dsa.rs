@@ -322,6 +322,46 @@ impl MlDsaJsonWebKey {
         }
     }
 
+    /// Consumes the key and returns a new key holding only the public key,
+    /// without a JSON or DER serialization round trip.
+    ///
+    /// The returned key keeps all metadata (`alg`, `use`, `kid`, `x5t`,
+    /// `x5t#S256`) but contains only the FIPS 204 public key: it can verify
+    /// signatures but not create them. The 32-byte seed (the JWK `priv`
+    /// member) exists only in the consumed key, which is freed when this
+    /// method returns.
+    ///
+    /// `Clone` on a JWK shares the backend key by reference count, so if this
+    /// key was cloned beforehand, the private material remains alive in those
+    /// clones until they drop as well.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the crypto backend rejects the public key (not
+    /// expected for keys built through this crate's validating constructors).
+    pub fn into_public(self) -> Result<Self, JoseError> {
+        let params = match self.evp_pkey.key_type() {
+            EvpPkeyType::MlDsa44 => MlDsaParameterSet::MlDsa44,
+            EvpPkeyType::MlDsa65 => MlDsaParameterSet::MlDsa65,
+            EvpPkeyType::MlDsa87 => MlDsaParameterSet::MlDsa87,
+            other => {
+                return Err(JoseError::InvalidKey(format!(
+                    "underlying key is not an ML-DSA key: {other:?}"
+                )));
+            }
+        };
+        let public = self.public_key_bytes();
+        let evp_pkey = EvpPkey::new_pqdsa_raw_public_key(params, &public)?;
+        Ok(Self {
+            evp_pkey,
+            alg: self.alg,
+            key_use: self.key_use,
+            key_id: self.key_id,
+            x5t: self.x5t,
+            x5t_s256: self.x5t_s256,
+        })
+    }
+
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     pub fn to_json(&self, level: OutputControlLevel) -> String {
         let alg = self.alg.name();

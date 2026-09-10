@@ -299,6 +299,40 @@ impl OkpJsonWebKey {
         self.x5t_s256.as_deref()
     }
 
+    /// Consumes the key and returns a new key holding only the public key,
+    /// without a JSON or DER serialization round trip.
+    ///
+    /// The returned key keeps all metadata (`alg`, `use`, `kid`, `x5t`,
+    /// `x5t#S256`) but contains only the 32-byte public key: it can verify
+    /// signatures (Ed25519) or act as a key-agreement peer key (X25519) but
+    /// holds no private material. The private key exists only in the consumed
+    /// key, which is freed when this method returns.
+    ///
+    /// `Clone` on a JWK shares the backend key by reference count, so if this
+    /// key was cloned beforehand, the private material remains alive in those
+    /// clones until they drop as well.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the crypto backend rejects the public key (not
+    /// expected for keys built through this crate's validating constructors).
+    pub fn into_public(self) -> Result<Self, JoseError> {
+        let key_type = self.evp_pkey.key_type();
+        let public = self
+            .evp_pkey
+            .get_raw_public_key()
+            .ok_or_else(|| JoseError::InvalidKey("OKP key has no raw public key".into()))?;
+        let evp_pkey = EvpPkey::new_raw_public_key(key_type, &public)?;
+        Ok(Self {
+            evp_pkey,
+            alg: self.alg,
+            key_use: self.key_use,
+            key_id: self.key_id,
+            x5t: self.x5t,
+            x5t_s256: self.x5t_s256,
+        })
+    }
+
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         use super::OutputControlLevel;
@@ -607,5 +641,29 @@ mod tests {
         let key = parse(json).unwrap();
 
         assert_eq!(key.algorithm(), Some("HS256"));
+    }
+
+    /// `into_public` strips the private key without a JSON round trip: the
+    /// public bytes and metadata survive, `d` is never emitted, and the
+    /// result still verifies a signature made by the private key.
+    #[test]
+    fn into_public_strips_private_key_and_keeps_metadata() {
+        let private = base64::url_decode("nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A").unwrap();
+        let mut key = OkpJsonWebKey::from_private_bytes(OkpCurve::Ed25519, &private).unwrap();
+        key.set_key_id("okp-1");
+        key.set_key_use(super::super::KeyUse::Signature);
+        let public_bytes = key.public_key_bytes();
+        let signature = key.sign(b"message").unwrap();
+
+        let public = key.into_public().unwrap();
+
+        assert_eq!(public.key_id(), Some("okp-1"));
+        assert_eq!(public.key_use(), Some(super::super::KeyUse::Signature));
+        assert_eq!(public.public_key_bytes(), public_bytes);
+        assert!(public.private_key_bytes().is_none());
+        assert!(public.verify(b"message", &signature));
+        let json = public.to_json(super::super::OutputControlLevel::IncludePrivate);
+        assert!(!json.contains("\"d\":"), "{json}");
+        assert!(json.contains("\"x\":"), "{json}");
     }
 }

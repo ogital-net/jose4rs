@@ -168,6 +168,11 @@ impl RsaParam {
     pub(crate) fn to_b64(self) -> Box<[u8]> {
         BigNum::ptr_to_b64(self.0)
     }
+
+    /// Returns an owned copy of the parameter.
+    pub(crate) fn to_owned_bignum(self) -> BigNum {
+        BigNum::dup(self.0)
+    }
 }
 
 unsafe impl Send for Rsa {}
