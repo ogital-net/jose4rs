@@ -301,29 +301,95 @@ impl From<JoseError> for InvalidJwtError {
     }
 }
 
+/// Packed boolean switches for JWT validation.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+struct ValidationFlags(u16);
+
+// `1 << 0` keeps the bit positions uniform across the constants.
+#[allow(clippy::identity_op)]
+impl ValidationFlags {
+    const REQUIRE_ISSUER: Self = Self(1 << 0);
+    const REQUIRE_AUDIENCE: Self = Self(1 << 1);
+    const STRICT_AUDIENCE: Self = Self(1 << 2);
+    const SKIP_DEFAULT_AUDIENCE_VALIDATION: Self = Self(1 << 3);
+    const REQUIRE_SUBJECT: Self = Self(1 << 4);
+    const REQUIRE_JWT_ID: Self = Self(1 << 5);
+    const REQUIRE_EXPIRATION: Self = Self(1 << 6);
+    const REQUIRE_NOT_BEFORE: Self = Self(1 << 7);
+    const REQUIRE_ISSUED_AT: Self = Self(1 << 8);
+    const SKIP_ALL_VALIDATORS: Self = Self(1 << 9);
+    const SKIP_ALL_DEFAULT_VALIDATORS: Self = Self(1 << 10);
+
+    /// `true` if `flag` is set.
+    #[inline]
+    const fn contains(self, flag: Self) -> bool {
+        self.0 & flag.0 != 0
+    }
+
+    /// Set or clear `flag` according to `on`.
+    #[inline]
+    fn set(&mut self, flag: Self, on: bool) {
+        if on {
+            self.0 |= flag.0;
+        } else {
+            self.0 &= !flag.0;
+        }
+    }
+}
+
+impl fmt::Debug for ValidationFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use ValidationFlags as VF;
+        const NAMES: [(ValidationFlags, &str); 11] = [
+            (VF::REQUIRE_ISSUER, "REQUIRE_ISSUER"),
+            (VF::REQUIRE_AUDIENCE, "REQUIRE_AUDIENCE"),
+            (VF::STRICT_AUDIENCE, "STRICT_AUDIENCE"),
+            (
+                VF::SKIP_DEFAULT_AUDIENCE_VALIDATION,
+                "SKIP_DEFAULT_AUDIENCE_VALIDATION",
+            ),
+            (VF::REQUIRE_SUBJECT, "REQUIRE_SUBJECT"),
+            (VF::REQUIRE_JWT_ID, "REQUIRE_JWT_ID"),
+            (VF::REQUIRE_EXPIRATION, "REQUIRE_EXPIRATION"),
+            (VF::REQUIRE_NOT_BEFORE, "REQUIRE_NOT_BEFORE"),
+            (VF::REQUIRE_ISSUED_AT, "REQUIRE_ISSUED_AT"),
+            (VF::SKIP_ALL_VALIDATORS, "SKIP_ALL_VALIDATORS"),
+            (
+                VF::SKIP_ALL_DEFAULT_VALIDATORS,
+                "SKIP_ALL_DEFAULT_VALIDATORS",
+            ),
+        ];
+        f.write_str("ValidationFlags(")?;
+        let mut wrote_any = false;
+        for (flag, name) in NAMES {
+            if self.contains(flag) {
+                if wrote_any {
+                    f.write_str(" | ")?;
+                }
+                f.write_str(name)?;
+                wrote_any = true;
+            }
+        }
+        if !wrote_any {
+            f.write_str("(empty)")?;
+        }
+        f.write_str(")")
+    }
+}
+
 /// Builder for creating a JWT Consumer with specific validation requirements
 #[derive(Default)]
 pub struct JwtConsumerBuilder {
     expected_issuers: Option<Vec<String>>,
-    require_issuer: bool,
     expected_audiences: Option<Vec<String>>,
-    require_audience: bool,
-    strict_audience: bool,
-    skip_default_audience_validation: bool,
     expected_subject: Option<String>,
-    require_subject: bool,
-    require_jwt_id: bool,
-    require_expiration: bool,
-    require_not_before: bool,
-    require_issued_at: bool,
     prohibited_claims: Vec<String>,
     evaluation_time: Option<SystemTime>,
     allowed_clock_skew: Duration,
     max_future_validity: Option<Duration>,
     iat_allowed_secs_in_future: Option<i64>,
     iat_allowed_secs_in_past: Option<i64>,
-    skip_all_validators: bool,
-    skip_all_default_validators: bool,
+    flags: ValidationFlags,
     custom_validators: Vec<Box<dyn JwtValidator>>,
 }
 
@@ -331,20 +397,8 @@ impl fmt::Debug for JwtConsumerBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JwtConsumerBuilder")
             .field("expected_issuers", &self.expected_issuers)
-            .field("require_issuer", &self.require_issuer)
             .field("expected_audiences", &self.expected_audiences)
-            .field("require_audience", &self.require_audience)
-            .field("strict_audience", &self.strict_audience)
-            .field(
-                "skip_default_audience_validation",
-                &self.skip_default_audience_validation,
-            )
             .field("expected_subject", &self.expected_subject)
-            .field("require_subject", &self.require_subject)
-            .field("require_jwt_id", &self.require_jwt_id)
-            .field("require_expiration", &self.require_expiration)
-            .field("require_not_before", &self.require_not_before)
-            .field("require_issued_at", &self.require_issued_at)
             .field("prohibited_claims", &self.prohibited_claims)
             .field("evaluation_time", &self.evaluation_time)
             .field("allowed_clock_skew", &self.allowed_clock_skew)
@@ -354,11 +408,7 @@ impl fmt::Debug for JwtConsumerBuilder {
                 &self.iat_allowed_secs_in_future,
             )
             .field("iat_allowed_secs_in_past", &self.iat_allowed_secs_in_past)
-            .field("skip_all_validators", &self.skip_all_validators)
-            .field(
-                "skip_all_default_validators",
-                &self.skip_all_default_validators,
-            )
+            .field("flags", &self.flags)
             .field("custom_validators", &self.custom_validators.len())
             .finish()
     }
@@ -427,7 +477,8 @@ impl JwtConsumerBuilder {
                 .map(std::string::ToString::to_string)
                 .collect(),
         );
-        self.require_issuer = require_issuer;
+        self.flags
+            .set(ValidationFlags::REQUIRE_ISSUER, require_issuer);
         self
     }
 
@@ -454,51 +505,53 @@ impl JwtConsumerBuilder {
                 .map(std::string::ToString::to_string)
                 .collect(),
         );
-        self.require_audience = require_audience;
-        self.strict_audience = strict;
+        self.flags
+            .set(ValidationFlags::REQUIRE_AUDIENCE, require_audience);
+        self.flags.set(ValidationFlags::STRICT_AUDIENCE, strict);
         self
     }
 
     /// Skip default audience validation
     pub fn set_skip_default_audience_validation(mut self) -> Self {
-        self.skip_default_audience_validation = true;
+        self.flags
+            .set(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION, true);
         self
     }
 
     /// Set the expected subject for the JWT
     pub fn set_expected_subject(mut self, subject: &str) -> Self {
         self.expected_subject = Some(subject.to_string());
-        self.require_subject = true;
+        self.flags.set(ValidationFlags::REQUIRE_SUBJECT, true);
         self
     }
 
     /// Require that a subject claim be present
     pub fn set_require_subject(mut self) -> Self {
-        self.require_subject = true;
+        self.flags.set(ValidationFlags::REQUIRE_SUBJECT, true);
         self
     }
 
     /// Require that a JWT ID claim be present
     pub fn set_require_jwt_id(mut self) -> Self {
-        self.require_jwt_id = true;
+        self.flags.set(ValidationFlags::REQUIRE_JWT_ID, true);
         self
     }
 
     /// Require that an expiration time claim be present
     pub fn set_require_expiration_time(mut self) -> Self {
-        self.require_expiration = true;
+        self.flags.set(ValidationFlags::REQUIRE_EXPIRATION, true);
         self
     }
 
     /// Require that a not before time claim be present
     pub fn set_require_not_before(mut self) -> Self {
-        self.require_not_before = true;
+        self.flags.set(ValidationFlags::REQUIRE_NOT_BEFORE, true);
         self
     }
 
     /// Require that an issued at time claim be present
     pub fn set_require_issued_at(mut self) -> Self {
-        self.require_issued_at = true;
+        self.flags.set(ValidationFlags::REQUIRE_ISSUED_AT, true);
         self
     }
 
@@ -554,13 +607,14 @@ impl JwtConsumerBuilder {
 
     /// Skip all claim validators
     pub fn set_skip_all_validators(mut self) -> Self {
-        self.skip_all_validators = true;
+        self.flags.set(ValidationFlags::SKIP_ALL_VALIDATORS, true);
         self
     }
 
     /// Skip all default claim validators (but not custom ones)
     pub fn set_skip_all_default_validators(mut self) -> Self {
-        self.skip_all_default_validators = true;
+        self.flags
+            .set(ValidationFlags::SKIP_ALL_DEFAULT_VALIDATORS, true);
         self
     }
 
@@ -621,25 +675,15 @@ impl JwtConsumerBuilder {
     pub fn build(self) -> JwtConsumer {
         JwtConsumer {
             expected_issuers: self.expected_issuers,
-            require_issuer: self.require_issuer,
             expected_audiences: self.expected_audiences,
-            require_audience: self.require_audience,
-            strict_audience: self.strict_audience,
-            skip_default_audience_validation: self.skip_default_audience_validation,
             expected_subject: self.expected_subject,
-            require_subject: self.require_subject,
-            require_jwt_id: self.require_jwt_id,
-            require_expiration: self.require_expiration,
-            require_not_before: self.require_not_before,
-            require_issued_at: self.require_issued_at,
             prohibited_claims: self.prohibited_claims,
             evaluation_time: self.evaluation_time,
             allowed_clock_skew: self.allowed_clock_skew,
             max_future_validity: self.max_future_validity,
             iat_allowed_secs_in_future: self.iat_allowed_secs_in_future,
             iat_allowed_secs_in_past: self.iat_allowed_secs_in_past,
-            skip_all_validators: self.skip_all_validators,
-            skip_all_default_validators: self.skip_all_default_validators,
+            flags: self.flags,
             custom_validators: self.custom_validators,
         }
     }
@@ -648,25 +692,15 @@ impl JwtConsumerBuilder {
 /// JWT Consumer for validating JWT claims
 pub struct JwtConsumer {
     expected_issuers: Option<Vec<String>>,
-    require_issuer: bool,
     expected_audiences: Option<Vec<String>>,
-    require_audience: bool,
-    strict_audience: bool,
-    skip_default_audience_validation: bool,
     expected_subject: Option<String>,
-    require_subject: bool,
-    require_jwt_id: bool,
-    require_expiration: bool,
-    require_not_before: bool,
-    require_issued_at: bool,
     prohibited_claims: Vec<String>,
     evaluation_time: Option<SystemTime>,
     allowed_clock_skew: Duration,
     max_future_validity: Option<Duration>,
     iat_allowed_secs_in_future: Option<i64>,
     iat_allowed_secs_in_past: Option<i64>,
-    skip_all_validators: bool,
-    skip_all_default_validators: bool,
+    flags: ValidationFlags,
     custom_validators: Vec<Box<dyn JwtValidator>>,
 }
 
@@ -674,20 +708,8 @@ impl fmt::Debug for JwtConsumer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JwtConsumer")
             .field("expected_issuers", &self.expected_issuers)
-            .field("require_issuer", &self.require_issuer)
             .field("expected_audiences", &self.expected_audiences)
-            .field("require_audience", &self.require_audience)
-            .field("strict_audience", &self.strict_audience)
-            .field(
-                "skip_default_audience_validation",
-                &self.skip_default_audience_validation,
-            )
             .field("expected_subject", &self.expected_subject)
-            .field("require_subject", &self.require_subject)
-            .field("require_jwt_id", &self.require_jwt_id)
-            .field("require_expiration", &self.require_expiration)
-            .field("require_not_before", &self.require_not_before)
-            .field("require_issued_at", &self.require_issued_at)
             .field("prohibited_claims", &self.prohibited_claims)
             .field("evaluation_time", &self.evaluation_time)
             .field("allowed_clock_skew", &self.allowed_clock_skew)
@@ -697,11 +719,7 @@ impl fmt::Debug for JwtConsumer {
                 &self.iat_allowed_secs_in_future,
             )
             .field("iat_allowed_secs_in_past", &self.iat_allowed_secs_in_past)
-            .field("skip_all_validators", &self.skip_all_validators)
-            .field(
-                "skip_all_default_validators",
-                &self.skip_all_default_validators,
-            )
+            .field("flags", &self.flags)
             .field("custom_validators", &self.custom_validators.len())
             .finish()
     }
@@ -715,20 +733,25 @@ impl JwtConsumer {
     /// Returns an error if the claims cannot be parsed or fail validation.
     pub fn process_to_claims(&self, claims: &str) -> Result<JwtClaims, InvalidJwtError> {
         let claims = JwtClaims::parse(claims)?;
-        if self.skip_all_validators {
+        if self.flags.contains(ValidationFlags::SKIP_ALL_VALIDATORS) {
             return Ok(claims);
         }
 
         let mut errors: Vec<ErrorCode> = Vec::new();
 
-        if !self.skip_all_default_validators {
+        if !self
+            .flags
+            .contains(ValidationFlags::SKIP_ALL_DEFAULT_VALIDATORS)
+        {
             // Validate issuer
             if let Err(e) = self.validate_issuer(&claims) {
                 errors.extend(e.error_codes);
             }
 
             // Validate audience
-            if !self.skip_default_audience_validation
+            if !self
+                .flags
+                .contains(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION)
                 && let Err(e) = self.validate_audience(&claims)
             {
                 errors.extend(e.error_codes);
@@ -790,7 +813,7 @@ impl JwtConsumer {
             ));
         }
 
-        if self.require_issuer && issuer.is_none() {
+        if self.flags.contains(ValidationFlags::REQUIRE_ISSUER) && issuer.is_none() {
             return Err(InvalidJwtError::with_error_code(
                 "issuer claim is required but missing",
                 ErrorCode::ISSUER_MISSING,
@@ -807,7 +830,7 @@ impl JwtConsumer {
                         ErrorCode::ISSUER_INVALID,
                     ));
                 }
-            } else if self.require_issuer {
+            } else if self.flags.contains(ValidationFlags::REQUIRE_ISSUER) {
                 return Err(InvalidJwtError::with_error_code(
                     "issuer claim is required but missing",
                     ErrorCode::ISSUER_MISSING,
@@ -835,7 +858,7 @@ impl JwtConsumer {
 
         let has_aud = aud.present;
 
-        if self.require_audience && !has_aud {
+        if self.flags.contains(ValidationFlags::REQUIRE_AUDIENCE) && !has_aud {
             return Err(InvalidJwtError::with_error_code(
                 "audience claim is required but missing",
                 ErrorCode::AUDIENCE_MISSING,
@@ -846,7 +869,7 @@ impl JwtConsumer {
             if has_aud {
                 // Strict mode (RFC 7523 client assertions) requires the raw aud
                 // to be a single string, not an array.
-                if self.strict_audience && !aud.is_string {
+                if self.flags.contains(ValidationFlags::STRICT_AUDIENCE) && !aud.is_string {
                     return Err(InvalidJwtError::with_error_code(
                         "audience must be a single string value in strict mode",
                         ErrorCode::AUDIENCE_INVALID,
@@ -863,13 +886,17 @@ impl JwtConsumer {
                         ErrorCode::AUDIENCE_INVALID,
                     ));
                 }
-            } else if self.require_audience {
+            } else if self.flags.contains(ValidationFlags::REQUIRE_AUDIENCE) {
                 return Err(InvalidJwtError::with_error_code(
                     "audience claim is required but missing",
                     ErrorCode::AUDIENCE_MISSING,
                 ));
             }
-        } else if !self.skip_default_audience_validation && has_aud {
+        } else if !self
+            .flags
+            .contains(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION)
+            && has_aud
+        {
             return Err(InvalidJwtError::with_error_code(
                 "no expected audience has been configured",
                 ErrorCode::AUDIENCE_MISSING,
@@ -882,7 +909,7 @@ impl JwtConsumer {
     fn validate_subject(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
         let subject = claims.subject();
 
-        if self.require_subject && subject.is_none() {
+        if self.flags.contains(ValidationFlags::REQUIRE_SUBJECT) && subject.is_none() {
             return Err(InvalidJwtError::with_error_code(
                 "subject claim is required but missing",
                 ErrorCode::SUBJECT_MISSING,
@@ -909,7 +936,7 @@ impl JwtConsumer {
     }
 
     fn validate_jwt_id(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
-        if self.require_jwt_id && claims.jwt_id().is_none() {
+        if self.flags.contains(ValidationFlags::REQUIRE_JWT_ID) && claims.jwt_id().is_none() {
             return Err(InvalidJwtError::with_error_code(
                 "JWT ID claim is required but missing",
                 ErrorCode::JWT_ID_MISSING,
@@ -1002,7 +1029,9 @@ impl JwtConsumer {
                     errors.push(ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE);
                 }
             }
-        } else if self.require_expiration && exp == TimeClaim::Absent {
+        } else if self.flags.contains(ValidationFlags::REQUIRE_EXPIRATION)
+            && exp == TimeClaim::Absent
+        {
             errors.push(ErrorCode::EXPIRATION_MISSING);
         }
 
@@ -1017,7 +1046,9 @@ impl JwtConsumer {
             if not_yet {
                 errors.push(ErrorCode::NOT_YET_VALID);
             }
-        } else if self.require_not_before && nbf == TimeClaim::Absent {
+        } else if self.flags.contains(ValidationFlags::REQUIRE_NOT_BEFORE)
+            && nbf == TimeClaim::Absent
+        {
             errors.push(ErrorCode::NOT_BEFORE_MISSING);
         }
 
@@ -1044,7 +1075,9 @@ impl JwtConsumer {
                     errors.push(ErrorCode::ISSUED_AT_INVALID_PAST);
                 }
             }
-        } else if self.require_issued_at && iat == TimeClaim::Absent {
+        } else if self.flags.contains(ValidationFlags::REQUIRE_ISSUED_AT)
+            && iat == TimeClaim::Absent
+        {
             errors.push(ErrorCode::ISSUED_AT_MISSING);
         }
 
