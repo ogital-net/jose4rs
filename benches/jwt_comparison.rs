@@ -35,7 +35,7 @@ struct Claims {
 }
 
 // jose4rs JWT consumer -- reused across HS256/RS256 benches.
-fn make_jose4rs_consumer() -> jose4rs::jwt::JwtConsumer {
+fn make_jose4rs_consumer() -> jose4rs::jwt::JwtConsumer<'static> {
     jose4rs::jwt::JwtConsumerBuilder::new()
         .set_expected_issuer(ISS)
         .set_expected_audience(true, false, &[AUD])

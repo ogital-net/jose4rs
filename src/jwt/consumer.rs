@@ -377,23 +377,23 @@ impl fmt::Debug for ValidationFlags {
     }
 }
 
-/// Builder for creating a JWT Consumer with specific validation requirements
+/// Builder for creating a JWT Consumer with specific validation requirements.
 #[derive(Default)]
-pub struct JwtConsumerBuilder {
-    expected_issuers: Option<Vec<String>>,
-    expected_audiences: Option<Vec<String>>,
-    expected_subject: Option<String>,
-    prohibited_claims: Vec<String>,
+pub struct JwtConsumerBuilder<'a> {
+    expected_issuers: Option<Vec<&'a str>>,
+    expected_audiences: Option<Vec<&'a str>>,
+    expected_subject: Option<&'a str>,
+    prohibited_claims: Vec<&'a str>,
     evaluation_time: Option<SystemTime>,
     allowed_clock_skew: Duration,
     max_future_validity: Option<Duration>,
     iat_allowed_secs_in_future: Option<i64>,
     iat_allowed_secs_in_past: Option<i64>,
     flags: ValidationFlags,
-    custom_validators: Vec<Box<dyn JwtValidator>>,
+    custom_validators: Vec<Box<dyn JwtValidator + 'a>>,
 }
 
-impl fmt::Debug for JwtConsumerBuilder {
+impl fmt::Debug for JwtConsumerBuilder<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JwtConsumerBuilder")
             .field("expected_issuers", &self.expected_issuers)
@@ -459,7 +459,7 @@ impl fmt::Debug for dyn JwtValidator {
     }
 }
 
-impl JwtConsumerBuilder {
+impl<'a> JwtConsumerBuilder<'a> {
     /// Create a new JWT Consumer Builder
     pub fn new() -> Self {
         Self::default()
@@ -470,21 +470,18 @@ impl JwtConsumerBuilder {
     /// # Arguments
     /// * `require_issuer` - Whether the issuer claim is required
     /// * `issuers` - Expected issuer value(s)
-    pub fn set_expected_issuers(mut self, require_issuer: bool, issuers: &[&str]) -> Self {
-        self.expected_issuers = Some(
-            issuers
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
-        );
+    pub fn set_expected_issuers(mut self, require_issuer: bool, issuers: &[&'a str]) -> Self {
+        self.expected_issuers = Some(issuers.to_vec());
         self.flags
             .set(ValidationFlags::REQUIRE_ISSUER, require_issuer);
         self
     }
 
     /// Set the expected issuer for the JWT (convenience method)
-    pub fn set_expected_issuer(self, issuer: &str) -> Self {
-        self.set_expected_issuers(true, &[issuer])
+    pub fn set_expected_issuer(mut self, issuer: &'a str) -> Self {
+        self.expected_issuers = Some(vec![issuer]);
+        self.flags.set(ValidationFlags::REQUIRE_ISSUER, true);
+        self
     }
 
     /// Set the expected audience(s) for the JWT
@@ -497,14 +494,9 @@ impl JwtConsumerBuilder {
         mut self,
         require_audience: bool,
         strict: bool,
-        audiences: &[&str],
+        audiences: &[&'a str],
     ) -> Self {
-        self.expected_audiences = Some(
-            audiences
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
-        );
+        self.expected_audiences = Some(audiences.to_vec());
         self.flags
             .set(ValidationFlags::REQUIRE_AUDIENCE, require_audience);
         self.flags.set(ValidationFlags::STRICT_AUDIENCE, strict);
@@ -519,8 +511,8 @@ impl JwtConsumerBuilder {
     }
 
     /// Set the expected subject for the JWT
-    pub fn set_expected_subject(mut self, subject: &str) -> Self {
-        self.expected_subject = Some(subject.to_string());
+    pub fn set_expected_subject(mut self, subject: &'a str) -> Self {
+        self.expected_subject = Some(subject);
         self.flags.set(ValidationFlags::REQUIRE_SUBJECT, true);
         self
     }
@@ -560,11 +552,8 @@ impl JwtConsumerBuilder {
     /// Useful to prevent cross-JWT confusion in situations where explicit
     /// typing via the `typ` header is not used -- e.g. rejecting an access
     /// token that carries a claim only ID tokens should have.
-    pub fn set_prohibited_claims(mut self, claims: &[&str]) -> Self {
-        self.prohibited_claims = claims
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect();
+    pub fn set_prohibited_claims(mut self, claims: &[&'a str]) -> Self {
+        self.prohibited_claims = claims.to_vec();
         self
     }
 
@@ -665,14 +654,14 @@ impl JwtConsumerBuilder {
     /// [`InvalidJwtError`]: crate::jwt::InvalidJwtError
     pub fn register_validator<V>(mut self, validator: V) -> Self
     where
-        V: JwtValidator + 'static,
+        V: JwtValidator + 'a,
     {
         self.custom_validators.push(Box::new(validator));
         self
     }
 
     /// Build the JWT Consumer
-    pub fn build(self) -> JwtConsumer {
+    pub fn build(self) -> JwtConsumer<'a> {
         JwtConsumer {
             expected_issuers: self.expected_issuers,
             expected_audiences: self.expected_audiences,
@@ -689,22 +678,22 @@ impl JwtConsumerBuilder {
     }
 }
 
-/// JWT Consumer for validating JWT claims
-pub struct JwtConsumer {
-    expected_issuers: Option<Vec<String>>,
-    expected_audiences: Option<Vec<String>>,
-    expected_subject: Option<String>,
-    prohibited_claims: Vec<String>,
+/// JWT Consumer for validating JWT claims.
+pub struct JwtConsumer<'a> {
+    expected_issuers: Option<Vec<&'a str>>,
+    expected_audiences: Option<Vec<&'a str>>,
+    expected_subject: Option<&'a str>,
+    prohibited_claims: Vec<&'a str>,
     evaluation_time: Option<SystemTime>,
     allowed_clock_skew: Duration,
     max_future_validity: Option<Duration>,
     iat_allowed_secs_in_future: Option<i64>,
     iat_allowed_secs_in_past: Option<i64>,
     flags: ValidationFlags,
-    custom_validators: Vec<Box<dyn JwtValidator>>,
+    custom_validators: Vec<Box<dyn JwtValidator + 'a>>,
 }
 
-impl fmt::Debug for JwtConsumer {
+impl fmt::Debug for JwtConsumer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("JwtConsumer")
             .field("expected_issuers", &self.expected_issuers)
@@ -725,7 +714,7 @@ impl fmt::Debug for JwtConsumer {
     }
 }
 
-impl JwtConsumer {
+impl JwtConsumer<'_> {
     /// Process JWT claims and validate them
     ///
     /// # Errors
@@ -822,9 +811,7 @@ impl JwtConsumer {
 
         if let Some(expected_issuers) = &self.expected_issuers {
             if let Some(issuer) = issuer {
-                if !expected_issuers.is_empty()
-                    && !expected_issuers.iter().any(|exp| exp.as_str() == issuer)
-                {
+                if !expected_issuers.is_empty() && !expected_issuers.contains(&issuer) {
                     return Err(InvalidJwtError::with_error_code(
                         format!("issuer '{issuer}' is not expected"),
                         ErrorCode::ISSUER_INVALID,
@@ -876,10 +863,7 @@ impl JwtConsumer {
                     ));
                 }
 
-                let matches = aud
-                    .values
-                    .iter()
-                    .any(|a| expected_audiences.iter().any(|e| e.as_str() == *a));
+                let matches = aud.values.iter().any(|a| expected_audiences.contains(a));
                 if !expected_audiences.is_empty() && !matches {
                     return Err(InvalidJwtError::with_error_code(
                         "no expected audience found in JWT",
@@ -918,7 +902,7 @@ impl JwtConsumer {
 
         if let Some(expected_subject) = &self.expected_subject {
             if let Some(subject) = subject {
-                if subject != expected_subject.as_str() {
+                if subject != *expected_subject {
                     return Err(InvalidJwtError::with_error_code(
                         format!("subject '{subject}' does not match expected '{expected_subject}'"),
                         ErrorCode::SUBJECT_INVALID,
@@ -946,19 +930,27 @@ impl JwtConsumer {
     }
 
     fn validate_prohibited_claims(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {
+        // Short-circuit before allocating: the common case (no prohibited
+        // claim present) does zero heap work.
+        if !self
+            .prohibited_claims
+            .iter()
+            .any(|name| claims.has_claim(name))
+        {
+            return Ok(());
+        }
+        // Error path only: name the offending claims. The second scan is
+        // fine -- we only reach here when validation is failing anyway.
         let present: Vec<&str> = self
             .prohibited_claims
             .iter()
             .filter(|name| claims.has_claim(name))
-            .map(String::as_str)
+            .copied()
             .collect();
-        if !present.is_empty() {
-            return Err(InvalidJwtError::with_error_code(
-                format!("JWT has prohibited claims: {}", present.join(", ")),
-                ErrorCode::PROHIBITED_CLAIM,
-            ));
-        }
-        Ok(())
+        Err(InvalidJwtError::with_error_code(
+            format!("JWT has prohibited claims: {}", present.join(", ")),
+            ErrorCode::PROHIBITED_CLAIM,
+        ))
     }
 
     fn validate_time_claims(&self, claims: &JwtClaims) -> Result<(), InvalidJwtError> {

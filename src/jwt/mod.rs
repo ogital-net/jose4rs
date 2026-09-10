@@ -581,7 +581,7 @@ impl JwtClaims {
     }
 
     /// Returns `true` if a claim with the given name is present (any type).
-    pub(crate) fn has_claim(&self, name: &str) -> bool {
+    pub fn has_claim(&self, name: &str) -> bool {
         with_value!(self, |v| v.get(name).is_some())
     }
 
