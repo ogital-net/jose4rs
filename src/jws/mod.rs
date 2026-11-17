@@ -452,6 +452,8 @@ impl<'a> JsonWebSignature<'a> {
     /// This method returns the payload **without** verifying the signature.
     /// Only use this when you trust the source or plan to verify the signature separately.
     /// For most use cases, prefer using [`JsonWebSignature::payload`] which verifies the signature first.
+    /// For an unencoded JWS with a supplied detached payload, returns those
+    /// detached bytes rather than any embedded payload.
     ///
     /// # Errors
     ///
@@ -467,6 +469,11 @@ impl<'a> JsonWebSignature<'a> {
     /// # Ok::<(), jose4rs::error::JoseError>(())
     /// ```
     pub fn unverified_payload(&self) -> Result<&[u8], JoseError> {
+        if !self.payload_is_b64
+            && let Some(ref payload) = self.detached_payload
+        {
+            return Ok(payload);
+        }
         let payload = self
             .payload
             .as_ref()
@@ -1030,11 +1037,7 @@ impl<'a> JsonWebSignature<'a> {
         if !self.verify_signature(key)? {
             return Err(JoseError::IntegrityError("JWS signature is invalid".into()));
         }
-        let payload = self
-            .payload
-            .as_ref()
-            .ok_or_else(|| JoseError::new("missing payload"))?;
-        Ok(payload.get(&self.buffer))
+        self.unverified_payload()
     }
 
     /// Produces the JWS compact serialization, signing with `key`.
@@ -1545,11 +1548,41 @@ mod tests {
         parsed.set_b64(false); // parse records b64=false from the header already
         parsed.set_detached_payload(b"$.02");
         assert!(parsed.verify_signature(&key).unwrap());
+        assert_eq!(parsed.unverified_payload().unwrap(), b"$.02");
+        assert_eq!(parsed.payload(&key).unwrap(), b"$.02");
 
         // A tampered payload must fail.
         let mut bad = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
         bad.set_detached_payload(b"$.03");
         assert!(!bad.verify_signature(&key).unwrap());
+        assert!(bad.payload(&key).is_err());
+    }
+
+    #[test]
+    fn test_b64_false_detached_payload_overrides_unsigned_embedded_payload() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+        let mut signer = JsonWebSignature::new();
+        signer.set_algorithm(AlgorithmIdentifier::HmacSha256);
+        signer.set_b64(false);
+        signer.set_detached_payload(b"signed-message");
+
+        let mut json = signer
+            .flattened_json_serialization(&key)
+            .unwrap()
+            .into_bytes();
+        let mut value = simd_json::to_owned_value(&mut json).unwrap();
+        value
+            .insert("payload", "YXR0YWNrZXItY29udHJvbGxlZA")
+            .unwrap();
+        let mut parsed =
+            JsonWebSignature::from_flattened_json_serialization(&value.encode()).unwrap();
+        parsed.set_detached_payload(b"signed-message");
+
+        assert!(parsed.verify_signature(&key).unwrap());
+        assert_eq!(parsed.payload(&key).unwrap(), b"signed-message");
+        assert_eq!(parsed.unverified_payload().unwrap(), b"signed-message");
     }
 
     /// b64=false without crit listing b64 must be rejected (RFC 7797 Section 3).
