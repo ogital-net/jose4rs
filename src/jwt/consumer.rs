@@ -780,7 +780,11 @@ impl JwtConsumer<'_> {
         // them.
         for validator in &self.custom_validators {
             if let Err(e) = validator.validate(claims) {
-                errors.extend(e.error_codes);
+                if e.error_codes.is_empty() {
+                    errors.push(ErrorCode::MISCELLANEOUS);
+                } else {
+                    errors.extend(e.error_codes);
+                }
             }
         }
 

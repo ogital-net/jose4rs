@@ -981,6 +981,44 @@ mod jwt_consumer_tests {
         assert!(!err.has_error_code(NONCE_MISMATCH));
     }
 
+    #[test]
+    fn register_validator_without_codes_is_rejected() {
+        for skip_defaults in [false, true] {
+            for empty_codes in [false, true] {
+                let builder = JwtConsumerBuilder::new().register_validator(move |_: &JwtClaims| {
+                    Err(if empty_codes {
+                        InvalidJwtError::with_error_codes("rejected", [])
+                    } else {
+                        InvalidJwtError::new("rejected")
+                    })
+                });
+                let consumer = if skip_defaults {
+                    builder.set_skip_all_default_validators()
+                } else {
+                    builder
+                }
+                .build();
+
+                let err = consumer.process_to_claims("{}").unwrap_err();
+                assert_eq!(err.error_codes(), &[ErrorCode::MISCELLANEOUS]);
+            }
+        }
+    }
+
+    #[test]
+    fn register_validator_without_codes_accumulates_failures() {
+        let custom = ErrorCode::custom(-2002);
+        let consumer = JwtConsumerBuilder::new()
+            .register_validator(|_: &JwtClaims| Err(InvalidJwtError::new("rejected")))
+            .register_validator(move |_: &JwtClaims| {
+                Err(InvalidJwtError::with_error_code("also rejected", custom))
+            })
+            .build();
+
+        let err = consumer.process_to_claims("{}").unwrap_err();
+        assert_eq!(err.error_codes(), &[ErrorCode::MISCELLANEOUS, custom]);
+    }
+
     /// A custom validator's failure coexists with a built-in validator's
     /// failure in the same `InvalidJwtError` -- the codes are accumulated,
     /// not short-circuited.
