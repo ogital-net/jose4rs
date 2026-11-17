@@ -232,10 +232,6 @@ impl<'a> JsonWebSignature<'a> {
             .verification_input
             .ok_or_else(|| JoseError::new("missing verification input, cannot verify JWS"))?;
 
-        // For b64=false the stored verification_input was built from the
-        // serialized (base64) form; rebuild it as `BASE64URL(protected) || '.'
-        // || <raw payload>`. The common b64=true path uses the stored input
-        // directly with no extra work.
         let rebuilt: Vec<u8>;
         let verification_input: &[u8] = if self.payload_is_b64 {
             verification_input.get(&self.buffer)
@@ -727,12 +723,14 @@ impl<'a> JsonWebSignature<'a> {
         // critical extension this implementation understands is RFC 7797 `b64`.
         crate::jwx::check_crit(&header, &["b64"])?;
 
-        // RFC 7797: read `b64`. The serialized "payload" member is ALWAYS
-        // base64url-encoded regardless of `b64`; `b64=false` only changes what
-        // feeds the signing input (raw payload instead of the encoded form).
-        // `crit` must list `b64` when it is false.
         let payload_is_b64 = header_b64_flag(&header)?;
-        let payload = base64::url_decode_append(encoded_payload, &mut self.buffer)?;
+        let payload = if payload_is_b64 {
+            base64::url_decode_append(encoded_payload, &mut self.buffer)?
+        } else {
+            let start = self.buffer.len();
+            self.buffer.extend_from_slice(encoded_payload);
+            BufferRef::new(start, self.buffer.len())
+        };
         let signature = base64::url_decode_append(encoded_signature, &mut self.buffer)?;
 
         self.payload_is_b64 = payload_is_b64;
@@ -986,24 +984,25 @@ impl<'a> JsonWebSignature<'a> {
             }
             out_buffer.clone()
         } else {
-            // b64=false: serialize the payload base64url-encoded UNLESS it is
-            // detached (then omit it). The signing input uses the raw bytes.
+            let payload = self
+                .detached_payload
+                .as_deref()
+                .or_else(|| {
+                    self.payload
+                        .as_ref()
+                        .map(|payload| payload.get(&self.buffer))
+                })
+                .unwrap_or_default();
             if self.detached_payload.is_none() {
-                match self.payload {
-                    Some(ref payload) => {
-                        let p =
-                            base64::url_encode_append(payload.get(&self.buffer), &mut out_buffer);
-                        out.insert("payload", unsafe {
-                            std::str::from_utf8_unchecked(p.get(&out_buffer))
-                        })
-                        .unwrap();
-                    }
-                    None => {
-                        out.insert("payload", "").unwrap();
-                    }
-                }
+                let text = std::str::from_utf8(payload).map_err(|_| {
+                    JoseError::MalformedToken(
+                        "unencoded payload must be valid UTF-8 for JSON serialization".into(),
+                    )
+                })?;
+                out.insert("payload", text).unwrap();
             }
-            self.build_unencoded_signing_input()?
+            out_buffer.extend_from_slice(payload);
+            out_buffer.clone()
         };
 
         let sig = self.sign(alg, &signing_input, key)?;
@@ -1487,10 +1486,8 @@ mod tests {
         let protected = "eyJhbGciOiJIUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19";
         let expected_sig = "A5dxf2s96_n5FLueVuW1Z_vh161FwXZC4YLPff6dmDY";
 
-        // Build the flattened serialization with the RAW payload $.02 embedded
-        // (base64url of the payload for the "payload" member is "JC4wMg").
         let flattened = format!(
-            r#"{{"protected":"{protected}","payload":"JC4wMg","signature":"{expected_sig}"}}"#
+            r#"{{"protected":"{protected}","payload":"$.02","signature":"{expected_sig}"}}"#
         );
 
         let jws = JsonWebSignature::from_flattened_json_serialization(&flattened).unwrap();
@@ -1524,6 +1521,75 @@ mod tests {
 
         assert!(parsed.verify_signature(&key).unwrap());
         assert_eq!(parsed.unverified_payload().unwrap(), b"$.02");
+    }
+
+    #[test]
+    fn test_b64_false_payload_is_raw_json_string() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+        for payload in [
+            b"hello world".as_slice(),
+            b"aGVsbG8".as_slice(),
+            b"quote\"\\\n".as_slice(),
+        ] {
+            let mut jws = JsonWebSignature::new();
+            jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
+            jws.set_b64(false);
+            jws.set_payload(payload);
+            let json = jws.flattened_json_serialization(&key).unwrap();
+            let mut bytes = json.as_bytes().to_vec();
+            let value = simd_json::to_owned_value(&mut bytes).unwrap();
+            assert_eq!(
+                value.get_str("payload"),
+                Some(std::str::from_utf8(payload).unwrap())
+            );
+            let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+            assert_eq!(parsed.payload(&key).unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn test_b64_false_binary_payload_requires_detachment() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+        let mut jws = JsonWebSignature::new();
+        jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
+        jws.set_b64(false);
+        jws.set_payload(b"binary\xff");
+        assert!(jws.flattened_json_serialization(&key).is_err());
+
+        jws.set_detached_payload(b"binary\xff");
+        let json = jws.flattened_json_serialization(&key).unwrap();
+        let mut parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+        parsed.set_detached_payload(b"binary\xff");
+        assert_eq!(parsed.payload(&key).unwrap(), b"binary\xff");
+    }
+
+    #[test]
+    fn test_b64_false_reserialization_signs_emitted_header() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+        let protected = base64::url_encode(br#"{"alg": "HS256", "b64": false, "crit": ["b64"]}"#);
+        let mut input = protected.to_vec();
+        input.extend_from_slice(b".hello world");
+        let JsonWebKey::Oct(oct) = &key else {
+            unreachable!()
+        };
+        let signature = base64::url_encode(oct.sign(&input, DigestAlgorithm::Sha256).unwrap());
+        let protected = std::str::from_utf8(&protected).unwrap();
+        let signature = std::str::from_utf8(&signature).unwrap();
+        let json = format!(
+            r#"{{"protected":"{protected}","payload":"hello world","signature":"{signature}"}}"#
+        );
+        let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+        assert_eq!(parsed.payload(&key).unwrap(), b"hello world");
+
+        let resigned = parsed.flattened_json_serialization(&key).unwrap();
+        let verified = JsonWebSignature::from_flattened_json_serialization(&resigned).unwrap();
+        assert_eq!(verified.payload(&key).unwrap(), b"hello world");
     }
 
     /// Detached payload: the payload is omitted from the serialization but
