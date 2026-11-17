@@ -8,16 +8,16 @@ use aws_lc_sys::{
     EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
     EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
     EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
-    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
-    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
-    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
-    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
-    EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_id,
-    EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new, EVP_PKEY_new_raw_private_key,
-    EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen, EVP_PKEY_paramgen_init, EVP_PKEY_up_ref,
-    EVP_marshal_private_key, EVP_marshal_public_key, PEM_write_bio_PKCS8PrivateKey,
-    PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
+    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA,
+    EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS,
+    EVP_PKEY_X25519, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp,
+    EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
+    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
+    EVP_PKEY_get_raw_private_key, EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY,
+    EVP_PKEY_get0_RSA, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
+    EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
+    EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
+    PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
@@ -26,16 +26,16 @@ use boring_sys::{
     EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
     EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
     EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
-    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
-    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
-    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
-    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
-    EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY, EVP_PKEY_get0_RSA, EVP_PKEY_id,
-    EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new, EVP_PKEY_new_raw_private_key,
-    EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen, EVP_PKEY_paramgen_init, EVP_PKEY_up_ref,
-    EVP_marshal_private_key, EVP_marshal_public_key, PEM_write_bio_PKCS8PrivateKey,
-    PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
+    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA,
+    EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS,
+    EVP_PKEY_X25519, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp,
+    EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
+    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
+    EVP_PKEY_get_raw_private_key, EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY,
+    EVP_PKEY_get0_RSA, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
+    EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
+    EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
+    PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
 };
 
 use crate::{
@@ -50,6 +50,9 @@ use super::{
     ec::{Curve, EcKey},
     rsa::Rsa,
 };
+
+// boring-sys has no binding for this; BoringSSL documents -1 as "salt length = digest length".
+const RSA_PSS_SALTLEN_DIGEST: i32 = -1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EvpPkeyType {
@@ -355,6 +358,10 @@ impl EvpPkey {
                 1 == unsafe { EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) },
                 "EVP_PKEY_CTX_set_rsa_mgf1_md() failed"
             );
+            assert!(
+                1 == unsafe { EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST) },
+                "EVP_PKEY_CTX_set_rsa_pss_saltlen() failed"
+            );
         }
 
         // Determine the maximum length of the signature.
@@ -467,15 +474,13 @@ impl EvpPkey {
             return false;
         }
 
-        if rsa_pss {
-            assert!(
-                1 == unsafe { EVP_PKEY_CTX_set_rsa_padding(pctx, RsaPadding::Pkcs1Pss.into()) },
-                "EVP_PKEY_CTX_set_rsa_padding() failed"
-            );
-            assert!(
-                1 == unsafe { EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) },
-                "EVP_PKEY_CTX_set_rsa_mgf1_md() failed"
-            );
+        // RSASSA-PSS-restricted keys can reject these parameters; fail closed.
+        if rsa_pss
+            && (1 != unsafe { EVP_PKEY_CTX_set_rsa_padding(pctx, RsaPadding::Pkcs1Pss.into()) }
+                || 1 != unsafe { EVP_PKEY_CTX_set_rsa_mgf1_md(pctx, md) }
+                || 1 != unsafe { EVP_PKEY_CTX_set_rsa_pss_saltlen(pctx, RSA_PSS_SALTLEN_DIGEST) })
+        {
+            return false;
         }
 
         1 == unsafe {
@@ -927,7 +932,105 @@ impl Drop for EvpPkeyCtx {
 mod tests {
     use crate::crypto::rand::rand_bytes;
 
+    #[cfg(feature = "aws-lc")]
+    use aws_lc_sys::{RSA_sign_pss_mgf1, RSA_verify_pss_mgf1};
+    #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
+    use boring_sys::{RSA_sign_pss_mgf1, RSA_verify_pss_mgf1};
+
     use super::*;
+
+    #[test]
+    fn test_rsa_pss_signing_uses_digest_length_salt() {
+        let key = EvpPkey::generate_rsa(2048);
+        let mut rsa = key.rsa().unwrap();
+        let message = b"JOSE RSA-PSS salt length";
+
+        for algorithm in [
+            digest::Algorithm::Sha256,
+            digest::Algorithm::Sha384,
+            digest::Algorithm::Sha512,
+        ] {
+            let signature = key.sign_rsa_pss(message, algorithm);
+            let mut hash_buf = [0; digest::MAX_OUTPUT_LEN];
+            let hash = digest::digest_buf(algorithm, message, &mut hash_buf);
+            let verified = unsafe {
+                RSA_verify_pss_mgf1(
+                    rsa.as_mut_ptr(),
+                    hash.as_ptr(),
+                    hash.len(),
+                    algorithm.as_ptr(),
+                    algorithm.as_ptr(),
+                    RSA_PSS_SALTLEN_DIGEST,
+                    signature.as_ptr(),
+                    signature.len(),
+                )
+            };
+            assert_eq!(verified, 1);
+        }
+    }
+
+    #[test]
+    fn test_rsa_pss_verification_requires_digest_length_salt() {
+        let key = EvpPkey::generate_rsa(2048);
+        let mut rsa = key.rsa().unwrap();
+        let message = b"JOSE RSA-PSS salt length";
+
+        for algorithm in [
+            digest::Algorithm::Sha256,
+            digest::Algorithm::Sha384,
+            digest::Algorithm::Sha512,
+        ] {
+            let mut hash_buf = [0; digest::MAX_OUTPUT_LEN];
+            let hash = digest::digest_buf(algorithm, message, &mut hash_buf);
+            for salt_len in [0, 1, hash.len() as i32, -2] {
+                let mut signature = vec![0; key.key_size_bytes()];
+                let mut signature_len = signature.len();
+                let signed = unsafe {
+                    RSA_sign_pss_mgf1(
+                        rsa.as_mut_ptr(),
+                        &mut signature_len,
+                        signature.as_mut_ptr(),
+                        signature.len(),
+                        hash.as_ptr(),
+                        hash.len(),
+                        algorithm.as_ptr(),
+                        algorithm.as_ptr(),
+                        salt_len,
+                    )
+                };
+                assert_eq!(signed, 1);
+                signature.truncate(signature_len);
+                assert_eq!(
+                    key.verify_rsa_pss(message, algorithm, &signature),
+                    salt_len == hash.len() as i32,
+                );
+            }
+        }
+    }
+
+    // BoringSSL does not parse RSASSA-PSS SPKIs.
+    #[cfg(feature = "aws-lc")]
+    #[test]
+    fn test_rsa_pss_restricted_key_with_incompatible_salt_fails_closed() {
+        // RSASSA-PSS SPKI restricted to SHA-256/MGF1-SHA-256 with a 64-byte minimum salt.
+        let pem = "-----BEGIN PUBLIC KEY-----
+MIIBVjBBBgkqhkiG9w0BAQowNKAPMA0GCWCGSAFlAwQCAQUAoRwwGgYJKoZIhvcN
+AQEIMA0GCWCGSAFlAwQCAQUAogMCAUADggEPADCCAQoCggEBALw2fPy8DUz6nnvi
+TpqThTkSKpTlQj5U4QholCR7WVvUISd75q4k/zuHFe2Mzc1eXfJu0jRkfzMNyUF8
+/jJRx3AcKW7l+sSN5uoBtB16D0uKvaCcTqGjGQs+M8d2+5G6N1n8PrLA7UZO5Z6u
+tVc68PDmLvCMfab73g6tboDpXXOmN0okuofKhDEDVyBWDvVe+CVL88URFB5xm5qX
+IOE5lcYl6WtM47vKEGThVBdev4vE291PgAopzQGjS8WQ3X71mpgFWmywTLk3q4zK
+ctK/F9tZ169/SnmFBh6003SI3XLD1FA1TkdWH9PkgiMgDi2DA0yZ+RdjZLsCnCbB
+FjsRvi0CAwEAAQ==
+-----END PUBLIC KEY-----
+";
+        let crate::jwk::JsonWebKey::Rsa(key) = crate::jwk::JsonWebKey::from_pem(pem).unwrap()
+        else {
+            panic!("expected an RSA key");
+        };
+        assert!(!key.verify_rsa_pss(b"message", digest::Algorithm::Sha256, &[0; 256]));
+        assert!(!key.verify_rsa_pss(b"message", digest::Algorithm::Sha512, &[0; 256]));
+    }
 
     #[test]
     fn test_generate_rsa() {
