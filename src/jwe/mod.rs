@@ -502,6 +502,7 @@ impl<'a> JsonWebEncryption<'a> {
         self.iv = Some(iv);
         self.ciphertext = Some(ciphertext);
         self.auth_tag = Some(auth_tag);
+        self.plaintext = None;
 
         Ok(())
     }
@@ -745,6 +746,41 @@ mod tests {
         let expected = b"Hello world!";
         let payload = jwe.payload(&jwk).unwrap();
         assert_eq!(*payload, *expected);
+    }
+
+    #[test]
+    fn reparsing_jwe_discards_cached_plaintext() {
+        let key = JsonWebKey::from_json(r#"{"kty":"oct","k":"IJRDL_AZnmxvH-peVRKlqQ"}"#).unwrap();
+        let compact = "eyJlbmMiOiJBMTI4R0NNIiwiYWxnIjoiZGlyIn0..BSnJ5pKU_3r48H7j.AlyooSZG5J9ptIB0.5iOBvkIeRM1Eolu7IuCl-A";
+        let mut jwe = JsonWebEncryption::from_compact_serialization(compact).unwrap();
+        assert_eq!(jwe.payload(&key).unwrap(), b"Hello world!");
+
+        let (prefix, _) = compact.rsplit_once('.').unwrap();
+        let forged = format!("{prefix}.AAAAAAAAAAAAAAAAAAAAAA");
+        jwe.set_compact_serialization(&forged).unwrap();
+        assert!(jwe.payload(&key).is_err());
+
+        jwe.set_compact_serialization(compact).unwrap();
+        assert_eq!(jwe.payload(&key).unwrap(), b"Hello world!");
+    }
+
+    #[test]
+    fn parsing_jwe_discards_builder_plaintext() {
+        let key = JsonWebKey::from_json(r#"{"kty":"oct","k":"IJRDL_AZnmxvH-peVRKlqQ"}"#).unwrap();
+        let compact = "eyJlbmMiOiJBMTI4R0NNIiwiYWxnIjoiZGlyIn0..BSnJ5pKU_3r48H7j.AlyooSZG5J9ptIB0.5iOBvkIeRM1Eolu7IuCl-A";
+
+        for encrypt_first in [false, true] {
+            let mut jwe = JsonWebEncryption::new();
+            jwe.set_algorithm(KeyManagementAlgorithm::Direct);
+            jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+            jwe.set_payload("old plaintext");
+            if encrypt_first {
+                jwe.encrypt(&key).unwrap();
+            }
+
+            jwe.set_compact_serialization(compact).unwrap();
+            assert_eq!(jwe.payload(&key).unwrap(), b"Hello world!");
+        }
     }
 
     #[test]
