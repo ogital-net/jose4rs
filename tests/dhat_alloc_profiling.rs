@@ -421,7 +421,7 @@ fn profile_jwt_to_json() {
     let output = claims.to_json();
     let stats_after = dhat::HeapStats::get();
 
-    assert!(!output.is_empty());
+    assert_ne!(output, "");
     println!("--- dhat: JwtClaims::to_json() ---");
     println!(
         "  blocks: {}",

@@ -633,7 +633,7 @@ mod jwt_consumer_tests {
         assert!(result.is_err());
         // Should have multiple error codes
         let err = result.unwrap_err();
-        assert!(!err.error_codes().is_empty());
+        assert_ne!(err.error_codes(), []);
     }
 
     /// Test that iat before nbf is acceptable
