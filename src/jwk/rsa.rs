@@ -9,7 +9,10 @@ use crate::{
     error::JoseError,
 };
 
-use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
+use super::{
+    GetStr, JsonWriter, JwkAlgorithm, OutputControlLevel, escaped_member_len, push_json_string,
+    raw_member_len,
+};
 
 #[derive(Clone)]
 /// An RSA JSON Web Key (`kty: "RSA"`), holding public and optionally private
@@ -287,33 +290,48 @@ impl RsaJsonWebKey {
             _ => Default::default(),
         };
 
-        // {"kty":"RSA"} plus optional ,"alg":"<alg>", ,"n":"<b64>", ,"e":"<b64>"
-        // and private params ,"<name>":"<b64>"
-        let b64_len = |v: &Option<RsaParam>| -> usize {
-            v.as_ref()
-                .map_or(0, |b| base64::url_encode_size(b.len_bytes()))
+        // Exact size: growing after private params are written would free an
+        // unwiped copy.
+        let b64_member_len = |name: &str, v: &Option<RsaParam>| -> usize {
+            v.as_ref().map_or(0, |b| {
+                raw_member_len(name, base64::url_encode_size(b.len_bytes()))
+            })
         };
-        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
-        // ,"x5t":"<27 chars>" and ,"x5t#S256":"<43 chars>"
-        let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_s256_len = self.x5t_s256.as_ref().map_or(0, |v| 13 + v.len());
-        // ,"kid":"<id>" and ,"use":"<use>"
-        let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
-        let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
-        let n_len = b64_len(&n) + 6;
-        let e_len = b64_len(&e) + 6;
+        let alg_len = self
+            .alg
+            .as_ref()
+            .map_or(0, |a| escaped_member_len("alg", a.name()));
+        let x5t_len = self
+            .x5t
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t", v));
+        let x5t_s256_len = self
+            .x5t_s256
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t#S256", v));
+        let kid_len = self
+            .key_id
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("kid", v));
+        let use_len = self
+            .key_use
+            .map_or(0, |u| raw_member_len("use", u.as_str().len()));
+        let n_len = b64_member_len("n", &n);
+        let e_len = b64_member_len("e", &e);
         let priv_len: usize = private_params
             .iter()
-            .map(|(v, name)| {
-                if v.is_some() {
-                    6 + name.len() + b64_len(v)
-                } else {
-                    0
-                }
-            })
+            .map(|(v, name)| b64_member_len(name, v))
             .sum();
-        let mut out = String::with_capacity(
-            13 + alg_len + x5t_len + x5t_s256_len + kid_len + use_len + n_len + e_len + priv_len,
+        let mut out = JsonWriter::with_len(
+            "{\"kty\":\"RSA\"}".len()
+                + alg_len
+                + x5t_len
+                + x5t_s256_len
+                + kid_len
+                + use_len
+                + n_len
+                + e_len
+                + priv_len,
         );
 
         out.push_str("{\"kty\":\"RSA\"");
@@ -365,7 +383,7 @@ impl RsaJsonWebKey {
             }
         }
         out.push('}');
-        out
+        out.finish()
     }
 
     /// The JWK key type: always `"RSA"`.

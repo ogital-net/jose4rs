@@ -6,7 +6,10 @@ use crate::{
     error::JoseError,
 };
 
-use super::{GetStr, JwkAlgorithm, OkpCurve, OutputControlLevel, push_json_string};
+use super::{
+    GetStr, JsonWriter, JwkAlgorithm, OkpCurve, OutputControlLevel, escaped_member_len,
+    push_json_string, raw_member_len,
+};
 
 #[derive(Clone)]
 /// An octet key pair JSON Web Key (`kty: "OKP"`), holding an Ed25519 or
@@ -351,21 +354,42 @@ impl OkpJsonWebKey {
             OutputControlLevel::IncludeSymmetric | OutputControlLevel::PublicOnly => None,
         };
 
-        // {"kty":"OKP","crv":"<crv>"} plus optional ,"alg":"<alg>",
-        // ,"x5t":"<tp>", ,"x5t#S256":"<tp>", ,"x":"<b64>" and ,"d":"<b64>"
-        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
-        let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
-        let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_s256_len = self.x5t_s256.as_ref().map_or(0, |v| 13 + v.len());
+        // Exact size: growing after `d` is written would free an unwiped copy.
+        let alg_len = self
+            .alg
+            .as_ref()
+            .map_or(0, |a| escaped_member_len("alg", a.name()));
+        let use_len = self
+            .key_use
+            .map_or(0, |u| raw_member_len("use", u.as_str().len()));
+        let kid_len = self
+            .key_id
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("kid", v));
+        let x5t_len = self
+            .x5t
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t", v));
+        let x5t_s256_len = self
+            .x5t_s256
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t#S256", v));
         let x_len = x
             .as_ref()
-            .map_or(0, |v| 6 + base64::url_encode_size(v.len()));
+            .map_or(0, |v| raw_member_len("x", base64::url_encode_size(v.len())));
         let d_len = d
             .as_ref()
-            .map_or(0, |v| 6 + base64::url_encode_size(v.len()));
-        let mut out = String::with_capacity(
-            21 + crv.len() + alg_len + use_len + kid_len + x5t_len + x5t_s256_len + x_len + d_len,
+            .map_or(0, |v| raw_member_len("d", base64::url_encode_size(v.len())));
+        let mut out = JsonWriter::with_len(
+            "{\"kty\":\"OKP\"}".len()
+                + raw_member_len("crv", crv.len())
+                + alg_len
+                + use_len
+                + kid_len
+                + x5t_len
+                + x5t_s256_len
+                + x_len
+                + d_len,
         );
 
         out.push_str("{\"kty\":\"OKP\",\"crv\":\"");
@@ -409,7 +433,7 @@ impl OkpJsonWebKey {
             out.push('"');
         }
         out.push('}');
-        out
+        out.finish()
     }
 
     /// The JWK key type: always `"OKP"`.

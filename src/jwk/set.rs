@@ -7,8 +7,8 @@
 
 use simd_json::prelude::*;
 
-use super::{JsonWebKey, KeyUse};
-use crate::error::JoseError;
+use super::{JsonWebKey, JsonWriter, KeyUse};
+use crate::{crypto::mem::Zeroizing, error::JoseError};
 
 /// A set of JSON Web Keys, as defined by RFC 7517.
 #[derive(Clone, Default)]
@@ -175,15 +175,27 @@ impl JsonWebKeySet {
     /// Serializes the set to a JWKS JSON document. Keys are emitted at the
     /// given output control level.
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
-        let mut out = String::from("{\"keys\":[");
-        for (i, key) in self.keys.iter().enumerate() {
+        // Each per-key buffer is exactly sized, so wiping `len` bytes wipes it all.
+        let keys: Vec<Zeroizing<Vec<u8>>> = self
+            .keys
+            .iter()
+            .map(|key| Zeroizing::new(key.to_json(level).into_bytes()))
+            .collect();
+        let len = "{\"keys\":[]}".len()
+            + keys.len().saturating_sub(1)
+            + keys.iter().map(|key| key.len()).sum::<usize>();
+
+        let mut out = JsonWriter::with_len(len);
+        out.push_str("{\"keys\":[");
+        for (i, key) in keys.iter().enumerate() {
             if i > 0 {
                 out.push(',');
             }
-            out.push_str(&key.to_json(level));
+            // SAFETY: the bytes came from `String::into_bytes`.
+            out.push_str(unsafe { std::str::from_utf8_unchecked(key) });
         }
         out.push_str("]}");
-        out
+        out.finish()
     }
 }
 

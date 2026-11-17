@@ -9,7 +9,9 @@ use crate::{
     error::JoseError,
 };
 
-use super::{GetStr, JwkAlgorithm, push_json_string};
+use super::{
+    GetStr, JsonWriter, JwkAlgorithm, escaped_member_len, push_json_string, raw_member_len,
+};
 
 #[derive(Clone)]
 /// A symmetric (shared-secret) JSON Web Key (`kty: "oct"`), used for HMAC
@@ -89,18 +91,26 @@ impl OctetSequenceJsonWebKey {
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         use super::OutputControlLevel;
 
-        // {"kty":"oct"} plus optional ,"alg":"<alg>", ,"use":"<use>",
-        // ,"kid":"<id>" and ,"k":"<b64>"
-        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
-        let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
-        let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
+        // Exact size: growing after `k` is written would free an unwiped copy.
+        let alg_len = self
+            .alg
+            .as_ref()
+            .map_or(0, |a| escaped_member_len("alg", a.name()));
+        let use_len = self
+            .key_use
+            .map_or(0, |u| raw_member_len("use", u.as_str().len()));
+        let kid_len = self
+            .key_id
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("kid", v));
         let k_len = match level {
             OutputControlLevel::IncludePrivate | OutputControlLevel::IncludeSymmetric => {
-                6 + base64::url_encode_size(self.oct_key.len())
+                raw_member_len("k", base64::url_encode_size(self.oct_key.len()))
             }
             OutputControlLevel::PublicOnly => 0,
         };
-        let mut out = String::with_capacity(13 + alg_len + use_len + kid_len + k_len);
+        let mut out =
+            JsonWriter::with_len("{\"kty\":\"oct\"}".len() + alg_len + use_len + kid_len + k_len);
 
         out.push_str("{\"kty\":\"oct\"");
         if let Some(alg) = &self.alg {
@@ -130,7 +140,7 @@ impl OctetSequenceJsonWebKey {
             OutputControlLevel::PublicOnly => {}
         }
         out.push('}');
-        out
+        out.finish()
     }
 
     /// The JWK key type: always `"oct"`.

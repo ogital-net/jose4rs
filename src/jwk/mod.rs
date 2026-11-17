@@ -7,7 +7,7 @@ use rsa::RsaJsonWebKey;
 use simd_json::derived::ValueObjectAccessAsScalar as _;
 
 use crate::{
-    crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, rand::rand_bytes},
+    crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, mem::Zeroizing, rand::rand_bytes},
     error::JoseError,
     jwe::{ContentEncryptionAlgorithm, KeyManagementAlgorithm},
     jws::AlgorithmIdentifier,
@@ -261,7 +261,48 @@ impl GetStr for &simd_json::OwnedValue {
     }
 }
 
-pub(super) fn push_json_string(out: &mut String, value: &str) {
+/// Fixed-size JWK JSON buffer. It cannot grow, so key material is never left
+/// behind in a freed allocation, and it is wiped if dropped before `finish`.
+pub(super) struct JsonWriter {
+    buf: Box<[u8]>,
+    len: usize,
+}
+
+impl JsonWriter {
+    pub(super) fn with_len(len: usize) -> Self {
+        Self {
+            buf: vec![0; len].into_boxed_slice(),
+            len: 0,
+        }
+    }
+
+    /// Panics if `s` does not fit in the remaining space.
+    pub(super) fn push_str(&mut self, s: &str) {
+        let end = self.len + s.len();
+        self.buf[self.len..end].copy_from_slice(s.as_bytes());
+        self.len = end;
+    }
+
+    pub(super) fn push(&mut self, c: char) {
+        self.push_str(c.encode_utf8(&mut [0; 4]));
+    }
+
+    pub(super) fn finish(mut self) -> String {
+        debug_assert_eq!(self.len, self.buf.len(), "JWK JSON size miscalculated");
+        let mut bytes = std::mem::take(&mut self.buf).into_vec();
+        bytes.truncate(self.len);
+        // SAFETY: only `&str` data is written, so `bytes[..len]` is valid UTF-8.
+        unsafe { String::from_utf8_unchecked(bytes) }
+    }
+}
+
+impl Drop for JsonWriter {
+    fn drop(&mut self) {
+        crate::crypto::mem::cleanse(&mut self.buf);
+    }
+}
+
+pub(super) fn push_json_string(out: &mut JsonWriter, value: &str) {
     const HEX: &[u8; 16] = b"0123456789abcdef";
 
     out.push('"');
@@ -284,6 +325,28 @@ pub(super) fn push_json_string(out: &mut String, value: &str) {
         }
     }
     out.push('"');
+}
+
+/// Exact number of bytes `push_json_string` writes for `value`, quotes included.
+pub(super) fn json_string_len(value: &str) -> usize {
+    2 + value
+        .bytes()
+        .map(|byte| match byte {
+            b'"' | b'\\' | 0x08 | 0x0c | b'\n' | b'\r' | b'\t' => 2,
+            0x00..=0x1f => 6,
+            _ => 1,
+        })
+        .sum::<usize>()
+}
+
+/// Length of `,"name":"<value>"` for a value written without escaping.
+pub(super) fn raw_member_len(name: &str, value_len: usize) -> usize {
+    name.len() + value_len + 6
+}
+
+/// Length of `,"name":` followed by `value` as written by `push_json_string`.
+pub(super) fn escaped_member_len(name: &str, value: &str) -> usize {
+    name.len() + 4 + json_string_len(value)
 }
 
 impl JsonWebKey {
@@ -571,45 +634,78 @@ impl JsonWebKey {
     ///
     /// # Errors
     ///
-    /// Returns an error if serializing the key to its canonical JSON fails.
+    /// Returns an error if the key's public components cannot be read.
     pub fn thumbprint(&self) -> Result<String, JoseError> {
         let canonical = self.thumbprint_canonical_json()?;
-        let digest =
-            crate::crypto::digest(crate::crypto::DigestAlgorithm::Sha256, canonical.as_bytes());
+        let digest = crate::crypto::digest(crate::crypto::DigestAlgorithm::Sha256, &*canonical);
         let encoded = crate::base64::url_encode(&digest);
         // SAFETY: base64url output is valid UTF-8.
         Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())
     }
 
-    /// Builds the RFC 7638 canonical JSON: the required members for the key
-    /// type, in lexicographic member-name order, with no whitespace.
-    fn thumbprint_canonical_json(&self) -> Result<String, JoseError> {
-        // Extract the JWK, then pull the required members out of it so the
-        // canonical form is independent of `to_json`'s field ordering. For
-        // symmetric `oct` keys the required `k` member is secret, so it is only
-        // present at the IncludePrivate level.
-        let level = match self {
-            JsonWebKey::Oct(_) => OutputControlLevel::IncludePrivate,
-            _ => OutputControlLevel::PublicOnly,
-        };
-        let json = self.to_json(level);
-        // The canonical output keeps only the required members, so it is never
-        // larger than the source JSON -- a safe upper bound for the capacity.
-        let capacity = json.len();
-        let mut buf = json.into_bytes();
-        let value = simd_json::to_owned_value(buf.as_mut_slice()).map_err(JoseError::json)?;
-
-        // Member names in lexicographic order per key type.
-        let members: &[&str] = match self {
-            JsonWebKey::EllipticCurve(_) => &["crv", "kty", "x", "y"],
-            JsonWebKey::Rsa(_) => &["e", "kty", "n"],
-            JsonWebKey::OctetKeyPair(_) => &["crv", "kty", "x"],
-            JsonWebKey::Oct(_) => &["k", "kty"],
+    /// Builds the RFC 7638 canonical JSON straight from the key's components,
+    /// so an `oct` key's `k` never passes through an unwiped intermediate.
+    // SAFETY (each `from_utf8_unchecked`): base64url output is pure ASCII.
+    fn thumbprint_canonical_json(&self) -> Result<Zeroizing<Vec<u8>>, JoseError> {
+        match self {
+            JsonWebKey::EllipticCurve(ec) => {
+                let curve = ec.get_curve();
+                let key = ec
+                    .evp_pkey()
+                    .ec()
+                    .ok_or_else(|| JoseError::InvalidKey("EC key has no public point".into()))?;
+                let (x, y) = key.pub_key_affine();
+                let x = x.to_b64_padded(curve.coordinate_len());
+                let y = y.to_b64_padded(curve.coordinate_len());
+                Ok(canonical_jwk_json(&[
+                    ("crv", curve.jose_name()),
+                    ("kty", "EC"),
+                    ("x", unsafe { std::str::from_utf8_unchecked(&x) }),
+                    ("y", unsafe { std::str::from_utf8_unchecked(&y) }),
+                ]))
+            }
+            JsonWebKey::Rsa(rsa) => {
+                let key = rsa.evp_pkey().rsa();
+                let (Some(n), Some(e)) = (
+                    key.as_ref().and_then(|k| k.n()),
+                    key.as_ref().and_then(|k| k.e()),
+                ) else {
+                    return Err(JoseError::InvalidKey(
+                        "RSA key has no modulus or exponent".into(),
+                    ));
+                };
+                let (n, e) = (n.to_b64(), e.to_b64());
+                Ok(canonical_jwk_json(&[
+                    ("e", unsafe { std::str::from_utf8_unchecked(&e) }),
+                    ("kty", "RSA"),
+                    ("n", unsafe { std::str::from_utf8_unchecked(&n) }),
+                ]))
+            }
+            JsonWebKey::OctetKeyPair(okp) => {
+                let x = crate::base64::url_encode(okp.public_key_bytes());
+                Ok(canonical_jwk_json(&[
+                    ("crv", okp.curve_name()),
+                    ("kty", "OKP"),
+                    ("x", unsafe { std::str::from_utf8_unchecked(&x) }),
+                ]))
+            }
+            JsonWebKey::Oct(oct) => {
+                let k = Zeroizing::new(crate::base64::url_encode(oct.key_bytes()));
+                Ok(canonical_jwk_json(&[
+                    ("k", unsafe { std::str::from_utf8_unchecked(&k) }),
+                    ("kty", "oct"),
+                ]))
+            }
             #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
-            JsonWebKey::MlDsa(_) => &["alg", "kty", "pub"],
-        };
-
-        canonical_jwk_json(&value, members, capacity)
+            JsonWebKey::MlDsa(ml_dsa) => {
+                let public = crate::base64::url_encode(ml_dsa.public_key_bytes());
+                Ok(canonical_jwk_json(&[
+                    ("alg", ml_dsa.parameter_set().jose_name()),
+                    ("kty", "AKP"),
+                    ("pub", unsafe { std::str::from_utf8_unchecked(&public) }),
+                ]))
+            }
+        }
     }
 
     /// The key ID (`kid`), if set.
@@ -725,32 +821,24 @@ impl OkpCurve {
     }
 }
 
-/// Builds an RFC 7638 canonical JWK JSON object from a parsed JWK value and
-/// the ordered list of required member names (lexicographic order, no
-/// whitespace). `capacity` is a pre-allocation hint (the full serialized key
-/// length is a safe upper bound). Returns an error if a member is absent.
-fn canonical_jwk_json(
-    value: &simd_json::owned::Value,
-    members: &[&str],
-    capacity: usize,
-) -> Result<String, JoseError> {
-    let mut out = String::with_capacity(capacity);
-    out.push('{');
-    for (i, name) in members.iter().enumerate() {
-        let field = value.get_str(*name).ok_or_else(|| {
-            JoseError::InvalidKey(format!("missing required JWK member '{name}'"))
-        })?;
-        if i > 0 {
-            out.push(',');
-        }
+/// RFC 7638 canonical JWK JSON. `members` must be in lexicographic order and
+/// need no escaping (base64url values and fixed names).
+fn canonical_jwk_json(members: &[(&str, &str)]) -> Zeroizing<Vec<u8>> {
+    let len = 1 + members
+        .iter()
+        .map(|(name, value)| raw_member_len(name, value.len()))
+        .sum::<usize>();
+    let mut out = JsonWriter::with_len(len);
+    for (i, (name, value)) in members.iter().enumerate() {
+        out.push(if i == 0 { '{' } else { ',' });
         out.push('"');
         out.push_str(name);
         out.push_str("\":\"");
-        out.push_str(field);
+        out.push_str(value);
         out.push('"');
     }
     out.push('}');
-    Ok(out)
+    Zeroizing::new(out.finish().into_bytes())
 }
 
 /// Generates JSON Web Keys appropriate for a given JOSE algorithm.
@@ -1251,21 +1339,116 @@ mod tests {
             ("\u{7f}é\u{2028}\u{2029}😀", "\"\u{7f}é\u{2028}\u{2029}😀\""),
             (r#"a","alg":"none"#, r#""a\",\"alg\":\"none""#),
         ] {
-            let mut out = String::new();
+            let mut out = JsonWriter::with_len(json_string_len(input));
             push_json_string(&mut out, input);
+            let out = out.finish();
             assert_eq!(out, expected, "{input:?}");
+            assert_eq!(json_string_len(input), out.len(), "{input:?}");
         }
     }
 
     #[test]
     fn test_push_json_string_round_trips_all_scalar_values() {
         let input: String = ('\0'..=char::MAX).collect();
-        let mut json = String::from("{\"v\":");
-        push_json_string(&mut json, &input);
-        json.push('}');
+        let mut out = JsonWriter::with_len("{\"v\":}".len() + json_string_len(&input));
+        out.push_str("{\"v\":");
+        push_json_string(&mut out, &input);
+        out.push('}');
+        let json = out.finish();
+        assert_eq!(json.len(), 6 + json_string_len(&input));
         let mut bytes = json.into_bytes();
         let value = simd_json::to_owned_value(&mut bytes).unwrap();
         assert_eq!(value.get_str("v"), Some(input.as_str()));
+    }
+
+    #[test]
+    #[should_panic(expected = "out of range")]
+    fn test_json_writer_never_grows() {
+        let mut out = JsonWriter::with_len(3);
+        out.push_str("abc");
+        out.push('d');
+    }
+
+    /// One freshly generated key of each type and serialization shape.
+    fn sample_keys() -> Vec<JsonWebKey> {
+        let generators = [
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256),
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::RsaUsingSha256),
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256),
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512),
+            JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::EdDsa),
+            JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::EcdhEs)
+                .with_okp_curve(OkpCurve::X25519),
+        ];
+        #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+        let generators = generators
+            .into_iter()
+            .chain([JsonWebKeyGenerator::for_signature(
+                AlgorithmIdentifier::MlDsa44,
+            )]);
+        generators
+            .into_iter()
+            .map(|generator| generator.generate().unwrap())
+            .collect()
+    }
+
+    /// `to_json` must size its buffer exactly: a reallocation after private
+    /// members are written would free an unwiped copy of the key.
+    #[test]
+    fn test_to_json_allocates_exact_capacity() {
+        use simd_json::{
+            derived::{MutableObject as _, ValueObjectAccessAsArray as _},
+            prelude::Writable as _,
+        };
+
+        let levels = [
+            OutputControlLevel::IncludePrivate,
+            OutputControlLevel::IncludeSymmetric,
+            OutputControlLevel::PublicOnly,
+        ];
+        let mut keys = Vec::new();
+        for key in sample_keys() {
+            for metadata in [None, Some("kid-1"), Some("q\"\\\n\u{01}\u{00e9}\u{1f600}")] {
+                let mut json = key.to_json(OutputControlLevel::IncludePrivate).into_bytes();
+                let mut value = simd_json::to_owned_value(&mut json).unwrap();
+                if let Some(metadata) = metadata {
+                    value.insert("use", "sig").unwrap();
+                    for name in ["kid", "x5t", "x5t#S256"] {
+                        value.insert(name, metadata).unwrap();
+                    }
+                }
+                let key = JsonWebKey::from_json(value.encode()).unwrap();
+
+                for level in levels {
+                    let json = key.to_json(level);
+                    assert_eq!(
+                        json.capacity(),
+                        json.len(),
+                        "{} {metadata:?} {level:?}",
+                        key.key_type()
+                    );
+                }
+                keys.push(key);
+            }
+        }
+
+        let count = keys.len();
+        let set = JsonWebKeySet::from_keys(keys);
+        for level in levels {
+            let json = set.to_json(level);
+            assert_eq!(json.capacity(), json.len(), "JWKS {level:?}");
+            let mut bytes = json.into_bytes();
+            let value = simd_json::to_owned_value(&mut bytes).unwrap();
+            assert_eq!(
+                value.get_array("keys").map(Vec::len),
+                Some(count),
+                "JWKS {level:?}"
+            );
+        }
+        assert_eq!(
+            JsonWebKeySet::default().to_json(levels[0]),
+            r#"{"keys":[]}"#
+        );
     }
 
     #[test]
@@ -1647,29 +1830,49 @@ mod tests {
         .unwrap();
         assert_eq!(t1, ec_with_meta.thumbprint().unwrap());
 
-        // OKP (Ed25519) and oct just need to produce a well-formed value.
+        // OKP (Ed25519): RFC 8037 Appendix A.3 known-answer vector.
         let okp = JsonWebKey::from_json(
             r#"{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#,
         )
         .unwrap();
-        assert_eq!(okp.thumbprint().unwrap().len(), 43); // 32 bytes -> 43 b64url chars
+        assert_eq!(
+            okp.thumbprint().unwrap(),
+            "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+        );
 
         let oct = JsonWebKey::from_json(r#"{"kty":"oct","k":"c2hvcnQ"}"#).unwrap();
         assert_eq!(oct.thumbprint().unwrap().len(), 43);
     }
 
-    /// `canonical_jwk_json` errors when a required member is absent (defensive;
-    /// unreachable via the public constructors, which validate members).
+    /// The canonical JSON built from key components must equal the required
+    /// members `to_json` emits, in RFC 7638 order, in an exactly sized buffer.
     #[test]
-    fn test_canonical_jwk_json_missing_member() {
-        let value =
-            simd_json::to_owned_value(&mut br#"{"kty":"RSA","e":"AQAB"}"#.to_vec()).unwrap();
-        // RSA requires "n", which is missing here.
-        let err = canonical_jwk_json(&value, &["e", "kty", "n"], 64).unwrap_err();
-        assert!(
-            matches!(err, JoseError::InvalidKey(ref m) if m.contains("'n'")),
-            "{err:?}"
-        );
+    fn test_thumbprint_canonical_json_matches_to_json() {
+        for key in sample_keys() {
+            let members: &[&str] = match key.key_type() {
+                "EC" => &["crv", "kty", "x", "y"],
+                "RSA" => &["e", "kty", "n"],
+                "OKP" => &["crv", "kty", "x"],
+                "oct" => &["k", "kty"],
+                _ => &["alg", "kty", "pub"],
+            };
+            let mut json = key.to_json(OutputControlLevel::IncludePrivate).into_bytes();
+            let value = simd_json::to_owned_value(&mut json).unwrap();
+            let fields: Vec<String> = members
+                .iter()
+                .map(|name| format!(r#""{name}":"{}""#, value.get_str(*name).unwrap()))
+                .collect();
+            let expected = format!("{{{}}}", fields.join(","));
+
+            let mut canonical = key.thumbprint_canonical_json().unwrap();
+            assert_eq!(&*canonical, expected.as_bytes(), "{}", key.key_type());
+            assert_eq!(
+                canonical.as_inner_mut().capacity(),
+                canonical.len(),
+                "{}",
+                key.key_type()
+            );
+        }
     }
 
     #[test]

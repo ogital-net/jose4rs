@@ -99,7 +99,10 @@ impl MlDsaParameterSet {
     }
 }
 
-use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
+use super::{
+    GetStr, JsonWriter, JwkAlgorithm, OutputControlLevel, escaped_member_len, push_json_string,
+    raw_member_len,
+};
 
 /// An AKP JSON Web Key (`kty: "AKP"`), holding an ML-DSA public key and,
 /// optionally, the 32-byte seed form of its private key (RFC 9964 Section 4).
@@ -364,15 +367,27 @@ impl MlDsaJsonWebKey {
 
     /// Serializes the key to its JWK JSON form, honoring the given output level.
     pub fn to_json(&self, level: OutputControlLevel) -> String {
+        // Exact size: growing after `priv` is written would free an unwiped copy.
         let alg = self.alg.name();
-        let alg_len = 9 + alg.len();
-        let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
-        let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_s256_len = self.x5t_s256.as_ref().map_or(0, |v| 13 + v.len());
+        let alg_len = raw_member_len("alg", alg.len());
+        let use_len = self
+            .key_use
+            .map_or(0, |u| raw_member_len("use", u.as_str().len()));
+        let kid_len = self
+            .key_id
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("kid", v));
+        let x5t_len = self
+            .x5t
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t", v));
+        let x5t_s256_len = self
+            .x5t_s256
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t#S256", v));
 
         let pub_bytes = self.public_key_bytes();
-        let pub_len = 8 + base64::url_encode_size(pub_bytes.len());
+        let pub_len = raw_member_len("pub", base64::url_encode_size(pub_bytes.len()));
 
         let priv_bytes = match level {
             OutputControlLevel::IncludePrivate => {
@@ -380,13 +395,19 @@ impl MlDsaJsonWebKey {
             }
             _ => None,
         };
-        let priv_len = priv_bytes
-            .as_ref()
-            .map_or(0, |v| 8 + base64::url_encode_size(v.len()));
+        let priv_len = priv_bytes.as_ref().map_or(0, |v| {
+            raw_member_len("priv", base64::url_encode_size(v.len()))
+        });
 
-        let capacity =
-            20 + alg_len + use_len + kid_len + x5t_len + x5t_s256_len + pub_len + priv_len;
-        let mut out = String::with_capacity(capacity);
+        let capacity = "{\"kty\":\"AKP\"}".len()
+            + alg_len
+            + use_len
+            + kid_len
+            + x5t_len
+            + x5t_s256_len
+            + pub_len
+            + priv_len;
+        let mut out = JsonWriter::with_len(capacity);
 
         out.push_str("{\"kty\":\"AKP\",\"alg\":\"");
         out.push_str(alg);
@@ -420,7 +441,7 @@ impl MlDsaJsonWebKey {
             out.push('"');
         }
         out.push('}');
-        out
+        out.finish()
     }
 
     /// The JWK key type: always `"AKP"`.

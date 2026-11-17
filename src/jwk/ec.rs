@@ -8,7 +8,10 @@ use crate::{
     error::JoseError,
 };
 
-use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
+use super::{
+    GetStr, JsonWriter, JwkAlgorithm, OutputControlLevel, escaped_member_len, push_json_string,
+    raw_member_len,
+};
 
 #[derive(Clone)]
 /// An elliptic-curve JSON Web Key (`kty: "EC"`), holding public and optionally
@@ -270,18 +273,34 @@ impl EcJsonWebKey {
             _ => None,
         };
 
-        // {"kty":"EC","crv":"<crv>","x":"<b64>","y":"<b64>"} plus optional
-        // ,"alg":"<alg>", ,"use":"<use>", ,"kid":"<id>", ,"x5t":"<tp>",
-        // ,"x5t#S256":"<tp>" and ,"d":"<b64>"
-        let alg_len = self.alg.as_ref().map_or(0, |a| 9 + a.name().len());
-        let use_len = self.key_use.map_or(0, |u| 8 + u.as_str().len());
-        let kid_len = self.key_id.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_len = self.x5t.as_ref().map_or(0, |v| 8 + v.len());
-        let x5t_s256_len = self.x5t_s256.as_ref().map_or(0, |v| 13 + v.len());
-        let d_len = d.as_ref().map_or(0, |_| 6 + b64_coordinate_len);
-        let mut out = String::with_capacity(
-            27 + curve.jose_name().len()
-                + (2 * b64_coordinate_len)
+        // Exact size: growing after `d` is written would free an unwiped copy.
+        let alg_len = self
+            .alg
+            .as_ref()
+            .map_or(0, |a| escaped_member_len("alg", a.name()));
+        let use_len = self
+            .key_use
+            .map_or(0, |u| raw_member_len("use", u.as_str().len()));
+        let kid_len = self
+            .key_id
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("kid", v));
+        let x5t_len = self
+            .x5t
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t", v));
+        let x5t_s256_len = self
+            .x5t_s256
+            .as_ref()
+            .map_or(0, |v| escaped_member_len("x5t#S256", v));
+        let d_len = d
+            .as_ref()
+            .map_or(0, |_| raw_member_len("d", b64_coordinate_len));
+        let mut out = JsonWriter::with_len(
+            "{\"kty\":\"EC\"}".len()
+                + raw_member_len("crv", curve.jose_name().len())
+                + raw_member_len("x", b64_coordinate_len)
+                + raw_member_len("y", b64_coordinate_len)
                 + alg_len
                 + use_len
                 + kid_len
@@ -331,7 +350,7 @@ impl EcJsonWebKey {
             out.push('"');
         }
         out.push('}');
-        out
+        out.finish()
     }
 
     /// The JWK key type: always `"EC"`.
