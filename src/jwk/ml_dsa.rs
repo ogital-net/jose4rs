@@ -99,7 +99,7 @@ impl MlDsaParameterSet {
     }
 }
 
-use super::{GetStr, JwkAlgorithm, OutputControlLevel};
+use super::{GetStr, JwkAlgorithm, OutputControlLevel, push_json_string};
 
 /// An AKP JSON Web Key (`kty: "AKP"`), holding an ML-DSA public key and,
 /// optionally, the 32-byte seed form of its private key (RFC 9964 Section 4).
@@ -397,19 +397,16 @@ impl MlDsaJsonWebKey {
             out.push('"');
         }
         if let Some(key_id) = &self.key_id {
-            out.push_str(",\"kid\":\"");
-            out.push_str(key_id);
-            out.push('"');
+            out.push_str(",\"kid\":");
+            push_json_string(&mut out, key_id);
         }
         if let Some(x5t) = &self.x5t {
-            out.push_str(",\"x5t\":\"");
-            out.push_str(x5t);
-            out.push('"');
+            out.push_str(",\"x5t\":");
+            push_json_string(&mut out, x5t);
         }
         if let Some(x5t_s256) = &self.x5t_s256 {
-            out.push_str(",\"x5t#S256\":\"");
-            out.push_str(x5t_s256);
-            out.push('"');
+            out.push_str(",\"x5t#S256\":");
+            push_json_string(&mut out, x5t_s256);
         }
         out.push_str(",\"pub\":\"");
         let pub_b64 = base64::url_encode(&pub_bytes);

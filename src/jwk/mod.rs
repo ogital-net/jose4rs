@@ -1239,6 +1239,82 @@ mod tests {
     }
 
     #[test]
+    fn test_push_json_string_exact_output() {
+        for (input, expected) in [
+            ("", r#""""#),
+            ("plain-kid_123", r#""plain-kid_123""#),
+            ("\"", r#""\"""#),
+            ("\\", r#""\\""#),
+            ("/", r#""/""#),
+            ("\u{08}\u{0c}\n\r\t", r#""\b\f\n\r\t""#),
+            ("\0\u{01}\u{0b}\u{1f}", r#""\u0000\u0001\u000b\u001f""#),
+            ("\u{7f}é\u{2028}\u{2029}😀", "\"\u{7f}é\u{2028}\u{2029}😀\""),
+            (r#"a","alg":"none"#, r#""a\",\"alg\":\"none""#),
+        ] {
+            let mut out = String::new();
+            push_json_string(&mut out, input);
+            assert_eq!(out, expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn test_push_json_string_round_trips_all_scalar_values() {
+        let input: String = ('\0'..=char::MAX).collect();
+        let mut json = String::from("{\"v\":");
+        push_json_string(&mut json, &input);
+        json.push('}');
+        let mut bytes = json.into_bytes();
+        let value = simd_json::to_owned_value(&mut bytes).unwrap();
+        assert_eq!(value.get_str("v"), Some(input.as_str()));
+    }
+
+    #[test]
+    fn test_to_json_escapes_metadata() {
+        use simd_json::{derived::MutableObject as _, prelude::Writable as _};
+
+        let algorithms = [
+            AlgorithmIdentifier::HmacSha256,
+            AlgorithmIdentifier::RsaUsingSha256,
+            AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256,
+            AlgorithmIdentifier::EdDsa,
+        ];
+        #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+        let algorithms = algorithms.into_iter().chain([AlgorithmIdentifier::MlDsa44]);
+
+        for algorithm in algorithms {
+            let key = JsonWebKeyGenerator::for_signature(algorithm)
+                .generate()
+                .unwrap();
+            for metadata in [
+                "quote\"slash\\controls\n\r\t\0\u{0008}\u{000c}\u{001f}\u{00e9}",
+                "original\",\"alg\":\"HS512\",\"ignored\":\"value",
+            ] {
+                let mut json = key.to_json(OutputControlLevel::IncludePrivate).into_bytes();
+                let mut value = simd_json::to_owned_value(&mut json).unwrap();
+                for name in ["kid", "x5t", "x5t#S256"] {
+                    value.insert(name, metadata).unwrap();
+                }
+                let parsed = JsonWebKey::from_json(value.encode()).unwrap();
+
+                for level in [
+                    OutputControlLevel::IncludePrivate,
+                    OutputControlLevel::IncludeSymmetric,
+                    OutputControlLevel::PublicOnly,
+                ] {
+                    let mut json = parsed.to_json(level).into_bytes();
+                    let output = simd_json::to_owned_value(&mut json).unwrap();
+                    assert_eq!(output.get_str("kid"), Some(metadata));
+                    assert_eq!(output.get_str("alg"), Some(algorithm.name()));
+                    if parsed.key_type() != "oct" {
+                        assert_eq!(output.get_str("x5t"), Some(metadata));
+                        assert_eq!(output.get_str("x5t#S256"), Some(metadata));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn test_to_json_round_trip() {
         // RSA (private includes private params, public excludes them)
         let rsa = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::RsaOaep256)

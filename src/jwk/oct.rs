@@ -113,9 +113,8 @@ impl OctetSequenceJsonWebKey {
             out.push('"');
         }
         if let Some(key_id) = &self.key_id {
-            out.push_str(",\"kid\":\"");
-            out.push_str(key_id);
-            out.push('"');
+            out.push_str(",\"kid\":");
+            push_json_string(&mut out, key_id);
         }
         match level {
             OutputControlLevel::IncludePrivate | OutputControlLevel::IncludeSymmetric => {
