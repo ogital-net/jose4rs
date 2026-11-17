@@ -26,16 +26,14 @@ pub(crate) fn url_encode(src: impl AsRef<[u8]>) -> Box<[u8]> {
 
 #[inline]
 pub(crate) fn url_encode_append(src: impl AsRef<[u8]>, dst: &mut Vec<u8>) -> BufferRef {
-    let need = base64::encoded_len(src.as_ref().len(), true).unwrap();
-    let cur_len = dst.len();
-    dst.reserve_exact(need);
-    unsafe { dst.set_len(cur_len + need) };
-
+    let src = src.as_ref();
+    let start = dst.len();
+    dst.resize(start + super::url_encode_size(src.len()), 0);
     let size = URL_SAFE_NO_PAD
-        .encode_slice(src.as_ref(), &mut dst[cur_len..])
+        .encode_slice(src, &mut dst[start..])
         .unwrap();
-    unsafe { dst.set_len(cur_len + size) };
-    BufferRef::new(cur_len, dst.len())
+    debug_assert_eq!(start + size, dst.len());
+    BufferRef::new(start, dst.len())
 }
 
 #[inline]
@@ -49,8 +47,15 @@ pub(crate) fn url_decode_append(
     src: impl AsRef<[u8]>,
     dst: &mut Vec<u8>,
 ) -> Result<BufferRef, Error> {
+    let src = src.as_ref();
     let start = dst.len();
-    URL_SAFE_NO_PAD.decode_vec(src.as_ref(), dst)?;
+    // base64 >= 0.22 accepts an exactly sized output slice.
+    dst.resize(start + super::url_decode_size(src.len()), 0);
+    let Ok(size) = URL_SAFE_NO_PAD.decode_slice(src, &mut dst[start..]) else {
+        dst.truncate(start);
+        return Err(Error(()));
+    };
+    dst.truncate(start + size);
     Ok(BufferRef::new(start, dst.len()))
 }
 

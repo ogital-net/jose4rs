@@ -86,4 +86,33 @@ mod tests {
             assert_eq!(decoded.len(), decode_size);
         }
     }
+
+    /// Callers size secret-bearing buffers with `url_*_size`; the append
+    /// helpers must never need more capacity than that, on either backend.
+    #[test]
+    fn test_append_fits_exact_size() {
+        for len in 0..64usize {
+            let bytes: Vec<u8> = (0..len).map(|i| i as u8 ^ 0x5a).collect();
+
+            let mut encoded = Vec::with_capacity(3 + url_encode_size(len));
+            encoded.extend_from_slice(b"pre");
+            let capacity = encoded.capacity();
+            url_encode_append(&bytes, &mut encoded);
+            assert_eq!(encoded.capacity(), capacity, "encode {len}");
+            assert_eq!(encoded.len(), capacity, "encode {len}");
+
+            let mut decoded = Vec::with_capacity(3 + url_decode_size(encoded.len() - 3));
+            decoded.extend_from_slice(b"pre");
+            let capacity = decoded.capacity();
+            url_decode_append(&encoded[3..], &mut decoded).unwrap();
+            assert_eq!(decoded.capacity(), capacity, "decode {len}");
+            assert_eq!(&decoded[3..], &bytes[..], "decode {len}");
+        }
+
+        let mut dst = b"pre".to_vec();
+        for invalid in ["A", "AAAAA", "AA==", "A*AA"] {
+            assert!(url_decode_append(invalid, &mut dst).is_err(), "{invalid}");
+            assert_eq!(dst, b"pre", "{invalid}");
+        }
+    }
 }
