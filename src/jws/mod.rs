@@ -1288,6 +1288,9 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         let start = self.buffer.len();
         self.buffer.extend_from_slice(payload.as_ref());
         self.payload = Some(BufferRef::new(start, self.buffer.len()));
+        self.verification_input = None;
+        self.signature = None;
+        self.detached_payload = None;
     }
 
     fn set_header_value(&mut self, name: impl Into<String>, value: simd_json::owned::Value) {
@@ -1583,6 +1586,41 @@ mod tests {
         assert!(parsed.verify_signature(&key).unwrap());
         assert_eq!(parsed.payload(&key).unwrap(), b"signed-message");
         assert_eq!(parsed.unverified_payload().unwrap(), b"signed-message");
+    }
+
+    #[test]
+    fn test_replacing_payload_invalidates_parsed_signature() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+
+        for (encoded, detached) in [(true, false), (false, false), (false, true)] {
+            let mut signer = JsonWebSignature::new();
+            signer.set_algorithm(AlgorithmIdentifier::HmacSha256);
+            signer.set_payload(b"signed-message");
+            signer.set_b64(encoded);
+            if detached {
+                signer.set_detached_payload(b"signed-message");
+            }
+            let json = signer.flattened_json_serialization(&key).unwrap();
+            let mut parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+            if detached {
+                parsed.set_detached_payload(b"signed-message");
+            }
+            assert!(parsed.verify_signature(&key).unwrap());
+
+            parsed.set_payload(b"unsigned-replacement");
+            assert_eq!(
+                parsed.unverified_payload().unwrap(),
+                b"unsigned-replacement"
+            );
+            assert!(parsed.verify_signature(&key).is_err());
+            assert!(parsed.payload(&key).is_err());
+
+            let resigned = parsed.flattened_json_serialization(&key).unwrap();
+            let verified = JsonWebSignature::from_flattened_json_serialization(&resigned).unwrap();
+            assert_eq!(verified.payload(&key).unwrap(), b"unsigned-replacement");
+        }
     }
 
     /// b64=false without crit listing b64 must be rejected (RFC 7797 Section 3).

@@ -33,6 +33,8 @@ pub trait JsonWebStructure<'a, A> {
     ) -> Result<(), JoseError>;
 
     /// Sets the payload to be signed or encrypted.
+    /// Replacing a JWS payload invalidates any previously parsed signature
+    /// and clears any supplied detached payload.
     fn set_payload(&mut self, payload: impl AsRef<[u8]>);
 
     /// Sets a typed header parameter to a string value.
