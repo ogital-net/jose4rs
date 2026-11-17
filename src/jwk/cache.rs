@@ -328,19 +328,20 @@ mod tests {
 
     #[test]
     fn test_parse_cache_control_directives() {
+        let empty: [CacheDirective; 0] = [];
         // Empty / whitespace input.
-        assert!(parse_cache_control("").is_empty());
-        assert!(parse_cache_control("   ").is_empty());
-        assert!(parse_cache_control(",,").is_empty());
+        assert_eq!(parse_cache_control(""), empty);
+        assert_eq!(parse_cache_control("   "), empty);
+        assert_eq!(parse_cache_control(",,"), empty);
         // Unknown directives are dropped.
-        assert!(parse_cache_control("foo, bar=baz").is_empty());
+        assert_eq!(parse_cache_control("foo, bar=baz"), empty);
         // max-age alone.
         assert_eq!(
             parse_cache_control("max-age=42"),
             vec![CacheDirective::Freshness(42)]
         );
         // s-maxage applies only to shared caches.
-        assert!(parse_cache_control("s-maxage=42").is_empty());
+        assert_eq!(parse_cache_control("s-maxage=42"), empty);
         // Invalid freshness is conservatively considered stale.
         assert_eq!(
             parse_cache_control("max-age=-1"),
