@@ -6,7 +6,6 @@ rust-version = "1.88"
 description = "A Rust implementation of the JOSE standards (JWS, JWE, JWK, JWT), ported from the Java jose4j library."
 license = "BSD-2-Clause"
 repository = "https://github.com/ogital-net/jose4rs"
-homepage = "https://github.com/ogital-net/jose4rs"
 documentation = "https://docs.rs/jose4rs"
 readme = "README.md"
 keywords = ["jose", "jwt", "jws", "jwe", "jwk"]

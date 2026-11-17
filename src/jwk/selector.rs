@@ -123,10 +123,7 @@ impl VerificationJwkSelector {
             return false;
         }
         // use: match-if-present on the JWK.
-        if !Presence::OmittedOkay.meets(want_use.as_str(), key.key_use().map(|u| u.as_str())) {
-            return false;
-        }
-        true
+        Presence::OmittedOkay.meets(want_use.as_str(), key.key_use().map(|u| u.as_str()))
     }
 }
 
@@ -182,12 +179,8 @@ impl DecryptionJwkSelector {
                     return false;
                 }
                 // use=enc is match-if-present.
-                if !Presence::OmittedOkay
+                Presence::OmittedOkay
                     .meets(KeyUse::Encryption.as_str(), k.key_use().map(|u| u.as_str()))
-                {
-                    return false;
-                }
-                true
             })
             .collect()
     }
