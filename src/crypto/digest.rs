@@ -14,8 +14,6 @@ use boring_sys::{
     EVP_sha256, EVP_sha384, EVP_sha512, SHA1, SHA256, SHA384, SHA512,
 };
 
-use crate::crypto::mem;
-
 pub(super) struct EvpMdCtx(EVP_MD_CTX);
 
 impl EvpMdCtx {
@@ -93,12 +91,12 @@ impl EvpMd {
     }
 
     pub fn finish(&mut self) -> Box<[u8]> {
-        let mut buf = mem::new_boxed_slice(self.output_len());
         unsafe {
+            let mut buf = Box::<[u8]>::new_uninit_slice(self.output_len());
             assert!(
                 1 == EVP_DigestFinal_ex(
                     self.ctx.as_mut_ptr(),
-                    buf.as_mut_ptr(),
+                    buf.as_mut_ptr() as *mut u8,
                     std::ptr::null_mut()
                 ),
                 "EVP_DigestFinal_ex() failed"
@@ -111,8 +109,8 @@ impl EvpMd {
                 ),
                 "EVP_DigestInit_ex() failed"
             );
+            buf.assume_init()
         }
-        buf
     }
 
     #[inline]

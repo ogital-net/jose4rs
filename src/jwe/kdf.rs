@@ -75,13 +75,21 @@ impl ConcatKDF {
             return Box::new([0, 0, 0, 0]);
         }
         let src_len = src.len();
-        let mut out = mem::new_boxed_slice(src_len + 4);
         let len_bytes = (src_len as u32).to_be_bytes();
         unsafe {
-            std::ptr::copy_nonoverlapping(len_bytes.as_ptr(), out.as_mut_ptr(), len_bytes.len());
-            std::ptr::copy_nonoverlapping(src.as_ptr(), out.as_mut_ptr().add(4), src_len);
+            let mut out = Box::<[u8]>::new_uninit_slice(src_len + 4);
+            std::ptr::copy_nonoverlapping(
+                len_bytes.as_ptr(),
+                out.as_mut_ptr() as *mut u8,
+                len_bytes.len(),
+            );
+            std::ptr::copy_nonoverlapping(
+                src.as_ptr(),
+                (out.as_mut_ptr() as *mut u8).add(4),
+                src_len,
+            );
+            out.assume_init()
         }
-        out
     }
 
     /// Length-prefixes the base64url-DECODED octets of an `apu`/`apv` value.

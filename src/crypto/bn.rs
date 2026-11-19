@@ -14,11 +14,7 @@ use boring_sys::{
     OPENSSL_free,
 };
 
-use crate::{
-    base64,
-    crypto::mem::{Zeroizing, new_boxed_slice},
-    error::JoseError,
-};
+use crate::{base64, crypto::mem::Zeroizing, error::JoseError};
 
 pub(crate) struct BigNum(ptr::NonNull<BIGNUM>);
 
@@ -46,11 +42,14 @@ impl BigNum {
     /// octets to `len` bytes, as required for JWK EC coordinates.
     pub(crate) fn to_b64_padded(&self, len: usize) -> Box<[u8]> {
         let ptr = self.as_ptr();
-        let mut buffer = Zeroizing::new(new_boxed_slice(len));
-        assert!(
-            1 == unsafe { BN_bn2bin_padded(buffer.as_mut_ptr(), len, ptr) },
-            "BN_bn2bin_padded() failed"
-        );
+        let buffer = unsafe {
+            let mut buffer = Box::<[u8]>::new_uninit_slice(len);
+            assert!(
+                1 == BN_bn2bin_padded(buffer.as_mut_ptr() as *mut u8, len, ptr),
+                "BN_bn2bin_padded() failed"
+            );
+            Zeroizing::new(buffer.assume_init())
+        };
         base64::url_encode(&buffer)
     }
 
@@ -143,16 +142,20 @@ impl BigNum {
         padded_len: usize,
     ) -> Box<[u8]> {
         unsafe {
-            let mut buffer = new_boxed_slice(padded_len * 2);
+            let mut buffer = Box::<[u8]>::new_uninit_slice(padded_len * 2);
             assert!(
-                1 == BN_bn2bin_padded(buffer.as_mut_ptr(), padded_len, r),
+                1 == BN_bn2bin_padded(buffer.as_mut_ptr() as *mut u8, padded_len, r),
                 "BN_bn2bin_padded() failed"
             );
             assert!(
-                1 == BN_bn2bin_padded(buffer.as_mut_ptr().add(padded_len), padded_len, s),
+                1 == BN_bn2bin_padded(
+                    (buffer.as_mut_ptr() as *mut u8).add(padded_len),
+                    padded_len,
+                    s
+                ),
                 "BN_bn2bin_padded() failed"
             );
-            buffer
+            buffer.assume_init()
         }
     }
 }

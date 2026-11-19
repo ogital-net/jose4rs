@@ -64,17 +64,17 @@ pub(crate) fn wrap_key(
     iv: Option<&[u8]>,
     src: &[u8],
 ) -> Result<Box<[u8]>, JoseError> {
-    let mut out = mem::new_boxed_slice(src.len() + 8);
+    let mut out = Box::<[u8]>::new_uninit_slice(src.len() + 8);
     let written = wrap_key_buf(aes_key, iv, src, &mut out)?;
     debug_assert_eq!(written, out.len());
-    Ok(out)
+    Ok(unsafe { out.assume_init() })
 }
 
 pub(crate) fn wrap_key_buf(
     aes_key: &[u8],
     iv: Option<&[u8]>,
     src: &[u8],
-    dst: &mut [u8],
+    dst: &mut [std::mem::MaybeUninit<u8>],
 ) -> Result<usize, JoseError> {
     assert!(src.len().is_multiple_of(8));
     assert!(dst.len() >= src.len() + 8);
@@ -85,7 +85,7 @@ pub(crate) fn wrap_key_buf(
         AES_wrap_key(
             aes_key.as_ptr(),
             iv.map_or(std::ptr::null(), <[u8]>::as_ptr),
-            dst.as_mut_ptr(),
+            dst.as_mut_ptr() as *mut u8,
             src.as_ptr(),
             src.len(),
         ) as i32
@@ -107,17 +107,22 @@ pub(crate) fn unwrap_key(
     if src.len() < 16 || !src.len().is_multiple_of(8) {
         return Err(JoseError::InvalidKey("invalid wrapped key length".into()));
     }
-    let mut out = mem::Zeroizing::new(mem::new_boxed_slice(src.len() - 8));
-    let written = unwrap_key_buf(aes_key, iv, src, &mut out)?;
-    debug_assert_eq!(written, out.len());
-    Ok(out)
+    let out_len = src.len() - 8;
+    let mut out = mem::ZeroizingUninit::new(Box::<[u8]>::new_uninit_slice(out_len));
+    let written = unwrap_key_buf(aes_key, iv, src, out.as_mut_slice())?;
+    if written != out_len {
+        return Err(JoseError::new(
+            "AES key unwrap returned an unexpected length",
+        ));
+    }
+    Ok(unsafe { out.assume_init() })
 }
 
 pub(crate) fn unwrap_key_buf(
     aes_key: &[u8],
     iv: Option<&[u8]>,
     src: &[u8],
-    dst: &mut [u8],
+    dst: &mut [MaybeUninit<u8>],
 ) -> Result<usize, JoseError> {
     assert!(src.len().is_multiple_of(8) && src.len() > 8);
     assert!(dst.len() >= src.len() - 8);
@@ -127,7 +132,7 @@ pub(crate) fn unwrap_key_buf(
         AES_unwrap_key(
             aes_key.as_ptr(),
             iv.map_or(std::ptr::null(), <[u8]>::as_ptr),
-            dst.as_mut_ptr(),
+            dst.as_mut_ptr() as *mut u8,
             src.as_ptr(),
             src.len(),
         ) as i32
@@ -178,6 +183,16 @@ mod tests {
         ];
         let out = unwrap_key(&aes_key, None, &wrapped).unwrap();
         assert_eq!(*out, expected);
+    }
+
+    #[test]
+    fn test_unwrap_key_rejects_wrong_iv() {
+        let aes_key = [0u8; 16];
+        let wrapped = wrap_key(&aes_key, None, &[0u8; 16]).unwrap();
+        assert!(matches!(
+            unwrap_key(&aes_key, Some(&[1u8; 8]), &wrapped),
+            Err(JoseError::IntegrityError(_))
+        ));
     }
 
     /// Regression: short or misaligned wrapped-key input must return an error,

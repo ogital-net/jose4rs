@@ -632,12 +632,16 @@ impl EvpPkey {
             return None;
         }
         unsafe {
-            let mut b = mem::new_boxed_slice(need);
+            let mut b = Box::<[u8]>::new_uninit_slice(need);
             assert!(
-                1 == EVP_PKEY_get_raw_private_key(self.as_ptr(), b.as_mut_ptr(), &mut need),
+                1 == EVP_PKEY_get_raw_private_key(
+                    self.as_ptr(),
+                    b.as_mut_ptr() as *mut u8,
+                    &mut need
+                ),
                 "EVP_PKEY_get_raw_private_key() failed"
             );
-            Some(b)
+            Some(b.assume_init())
         }
     }
 
@@ -647,12 +651,16 @@ impl EvpPkey {
             return None;
         }
         unsafe {
-            let mut b = mem::new_boxed_slice(need);
+            let mut b = Box::<[u8]>::new_uninit_slice(need);
             assert!(
-                1 == EVP_PKEY_get_raw_public_key(self.as_ptr(), b.as_mut_ptr(), &mut need),
+                1 == EVP_PKEY_get_raw_public_key(
+                    self.as_ptr(),
+                    b.as_mut_ptr() as *mut u8,
+                    &mut need
+                ),
                 "EVP_PKEY_get_raw_public_key() failed"
             );
-            Some(b)
+            Some(b.assume_init())
         }
     }
     /// Returns the 32-byte ML-DSA seed (RFC 9964 Section 4 private-key form) for
@@ -681,12 +689,12 @@ impl EvpPkey {
             return None;
         }
         unsafe {
-            let mut b = mem::new_boxed_slice(need);
+            let mut b = Box::<[u8]>::new_uninit_slice(need);
             assert!(
-                1 == EVP_PKEY_get_private_seed(self.as_ptr(), b.as_mut_ptr(), &mut need),
+                1 == EVP_PKEY_get_private_seed(self.as_ptr(), b.as_mut_ptr() as *mut u8, &mut need),
                 "EVP_PKEY_get_private_seed() failed"
             );
-            Some(b)
+            Some(b.assume_init())
         }
     }
     fn rsaes_init(

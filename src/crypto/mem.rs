@@ -1,5 +1,5 @@
 use std::{
-    alloc,
+    mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
 
@@ -66,6 +66,36 @@ where
 impl<T: AsMut<[u8]>> Drop for Zeroizing<T> {
     fn drop(&mut self) {
         cleanse(self.0.as_mut());
+    }
+}
+
+pub(crate) struct ZeroizingUninit<T: AsMut<[MaybeUninit<u8>]>>(T);
+
+impl<T: AsMut<[MaybeUninit<u8>]>> ZeroizingUninit<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [MaybeUninit<u8>] {
+        self.0.as_mut()
+    }
+}
+
+impl ZeroizingUninit<Box<[MaybeUninit<u8>]>> {
+    /// # Safety
+    /// Every byte in the boxed slice must be initialized.
+    pub(crate) unsafe fn assume_init(mut self) -> Zeroizing<Box<[u8]>> {
+        let bytes = std::mem::take(&mut self.0);
+        Zeroizing::new(unsafe { bytes.assume_init() })
+    }
+}
+
+impl<T: AsMut<[MaybeUninit<u8>]>> Drop for ZeroizingUninit<T> {
+    fn drop(&mut self) {
+        let bytes = self.as_mut_slice();
+        if !bytes.is_empty() {
+            unsafe { OPENSSL_cleanse(bytes.as_mut_ptr().cast(), bytes.len()) };
+        }
     }
 }
 
@@ -145,18 +175,6 @@ impl Drop for ZeroizingVec {
     }
 }
 
-pub(crate) fn new_boxed_slice(len: usize) -> Box<[u8]> {
-    debug_assert!(len > 0);
-    unsafe {
-        let layout = alloc::Layout::from_size_align_unchecked(len, 1);
-        let ptr = alloc::alloc(layout);
-        if ptr.is_null() {
-            alloc::handle_alloc_error(layout);
-        }
-        Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +186,30 @@ mod tests {
             let _secret = Zeroizing::new(bytes.as_mut_slice());
         }
         assert_eq!(bytes, [0; 32]);
+    }
+
+    #[test]
+    fn zeroizing_uninit_cleanses_on_drop() {
+        let mut bytes = [MaybeUninit::uninit(); 3];
+        {
+            let mut secret = ZeroizingUninit::new(bytes.as_mut_slice());
+            secret.as_mut_slice()[0].write(0x5a);
+            secret.as_mut_slice()[2].write(0xa5);
+        }
+        assert_eq!(unsafe { bytes[0].assume_init() }, 0);
+        assert_eq!(unsafe { bytes[2].assume_init() }, 0);
+    }
+
+    #[test]
+    fn zeroizing_uninit_transfers_box() {
+        let mut secret = ZeroizingUninit::new(Box::<[u8]>::new_uninit_slice(2));
+        let bytes = secret.as_mut_slice();
+        bytes[0].write(0x5a);
+        bytes[1].write(0xa5);
+        let original_ptr = bytes.as_ptr().cast::<u8>();
+        let initialized = unsafe { secret.assume_init() };
+        assert_eq!(initialized.as_ptr(), original_ptr);
+        assert_eq!(*initialized, [0x5a, 0xa5]);
     }
 
     #[test]

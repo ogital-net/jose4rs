@@ -24,23 +24,25 @@ pub(crate) fn pbkdf2_hmac(
         ));
     }
 
-    let mut out = Zeroizing::new(super::mem::new_boxed_slice(out_len));
-
-    let res = unsafe {
-        PKCS5_PBKDF2_HMAC(
-            password.as_ptr().cast(),
-            password.len(),
-            salt.as_ptr(),
-            salt.len(),
-            iterations,
-            md.as_ptr(),
-            out.len(),
-            out.as_mut_ptr(),
-        )
+    let out = unsafe {
+        let mut out = Zeroizing::new(vec![0u8; out_len].into_boxed_slice());
+        let res = {
+            PKCS5_PBKDF2_HMAC(
+                password.as_ptr().cast(),
+                password.len(),
+                salt.as_ptr(),
+                salt.len(),
+                iterations,
+                md.as_ptr(),
+                out.len(),
+                out.as_mut_ptr(),
+            )
+        };
+        if res != 1 {
+            return Err(JoseError::new("PKCS5_PBKDF2_HMAC() failed"));
+        }
+        out
     };
-    if res != 1 {
-        return Err(JoseError::new("PKCS5_PBKDF2_HMAC() failed"));
-    }
 
     Ok(out)
 }

@@ -3,8 +3,6 @@ use aws_lc_sys::RAND_bytes;
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::RAND_bytes;
 
-use super::mem;
-
 pub(crate) fn rand_bytes_buf(mut dst: impl AsMut<[u8]>) {
     let buf = dst.as_mut();
     if buf.is_empty() {
@@ -18,9 +16,13 @@ pub(crate) fn rand_bytes_buf(mut dst: impl AsMut<[u8]>) {
 }
 
 pub(crate) fn rand_bytes(len: usize) -> Box<[u8]> {
-    let mut b = mem::new_boxed_slice(len);
-    rand_bytes_buf(&mut b);
-    b
+    let mut buf = Box::<[u8]>::new_uninit_slice(len);
+    unsafe {
+        let result = RAND_bytes(buf.as_mut_ptr() as *mut u8, buf.len());
+        // RAND_bytes returns 1 on success, 0 or -1 on failure
+        assert!(result == 1, "RAND_bytes failed");
+        buf.assume_init()
+    }
 }
 
 #[cfg(test)]

@@ -664,7 +664,7 @@ impl KeyManagementAlgorithm {
         }
 
         let iv = rand_bytes(alg.iv_len());
-        let mut tag = mem::new_boxed_slice(alg.max_tag_len());
+        let mut tag = vec![0u8; alg.max_tag_len()].into_boxed_slice();
         let mut encrypted_key = cek.to_vec();
         let ctx = aead::EvpAeadCtx::init(alg, key_bytes);
         ctx.encrypt(&iv, &[], &mut encrypted_key, &mut tag)?;
