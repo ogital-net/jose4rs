@@ -78,7 +78,6 @@
     clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
-    clippy::borrow_as_ptr,
     clippy::ptr_as_ptr,
     clippy::ptr_cast_constness,
     clippy::ref_as_ptr,

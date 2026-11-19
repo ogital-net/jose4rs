@@ -48,7 +48,7 @@ impl Bio {
             let mut ptr = MaybeUninit::<*const u8>::uninit();
             let mut len: usize = 0;
             assert!(
-                1 == BIO_mem_contents(self.as_ptr(), ptr.as_mut_ptr(), &mut len),
+                1 == BIO_mem_contents(self.as_ptr(), ptr.as_mut_ptr(), &raw mut len),
                 "BIO_mem_contents() failed"
             );
             let ptr = ptr.assume_init();

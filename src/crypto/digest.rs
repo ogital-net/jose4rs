@@ -26,11 +26,11 @@ impl EvpMdCtx {
     }
 
     pub(super) fn as_mut_ptr(&mut self) -> *mut EVP_MD_CTX {
-        &mut self.0
+        &raw mut self.0
     }
 
     pub(super) fn as_ptr(&self) -> *const EVP_MD_CTX {
-        &self.0
+        &raw const self.0
     }
 }
 

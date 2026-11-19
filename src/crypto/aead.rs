@@ -37,11 +37,11 @@ impl EvpAeadCtx {
     }
 
     pub(super) fn as_mut_ptr(&mut self) -> *mut EVP_AEAD_CTX {
-        &mut self.0
+        &raw mut self.0
     }
 
     pub(super) fn as_ptr(&self) -> *const EVP_AEAD_CTX {
-        &self.0
+        &raw const self.0
     }
 
     pub(crate) fn encrypt<'a>(
@@ -58,7 +58,7 @@ impl EvpAeadCtx {
                 self.as_ptr(),
                 in_out.as_mut_ptr(),
                 tag.as_mut_ptr(),
-                &mut tag_len,
+                &raw mut tag_len,
                 tag.len(),
                 iv.as_ptr(),
                 iv.len(),

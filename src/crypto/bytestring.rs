@@ -21,7 +21,7 @@ impl Cbb {
     }
 
     pub(super) fn as_mut_ptr(&mut self) -> *mut CBB {
-        &mut self.0
+        &raw mut self.0
     }
 
     pub(super) fn into_boxed_slice(mut self) -> Box<[u8]> {
@@ -30,7 +30,7 @@ impl Cbb {
 
         unsafe {
             assert!(
-                1 == CBB_finish(self.as_mut_ptr(), &mut out_data, &mut out_len),
+                1 == CBB_finish(self.as_mut_ptr(), &raw mut out_data, &raw mut out_len),
                 "CBB_finish() failed"
             );
             let s = std::slice::from_raw_parts(out_data, out_len);

@@ -28,7 +28,7 @@ impl EvpCipherCtx {
     }
 
     pub(super) fn as_mut_ptr(&mut self) -> *mut EVP_CIPHER_CTX {
-        &mut self.0
+        &raw mut self.0
     }
 
     pub(crate) fn encrypt<'a>(
@@ -81,7 +81,7 @@ impl EvpCipherCtx {
                 1 == EVP_EncryptUpdate(
                     self.as_mut_ptr(),
                     in_out.as_mut_ptr(),
-                    &mut written,
+                    &raw mut written,
                     in_out.as_ptr(),
                     in_out.len().try_into().unwrap()
                 ),
@@ -92,7 +92,7 @@ impl EvpCipherCtx {
                 1 == EVP_EncryptFinal_ex(
                     self.as_mut_ptr(),
                     in_out.as_mut_ptr().add(in_out.len()),
-                    &mut written
+                    &raw mut written
                 ),
                 "EVP_EncryptFinal_ex() failed"
             );
@@ -157,7 +157,7 @@ impl EvpCipherCtx {
                 EVP_DecryptUpdate(
                     self.as_mut_ptr(),
                     ciphertext.as_mut_ptr(),
-                    &mut written,
+                    &raw mut written,
                     ciphertext.as_ptr(),
                     ciphertext.len().try_into().unwrap()
                 )
@@ -166,7 +166,7 @@ impl EvpCipherCtx {
             if 1 != EVP_DecryptFinal_ex(
                 self.as_mut_ptr(),
                 ciphertext.as_mut_ptr().add(end),
-                &mut written,
+                &raw mut written,
             ) {
                 return Err(JoseError::InvalidKey("decryption failed".into()));
             }

@@ -338,7 +338,7 @@ impl EvpPkey {
         if 1 != unsafe {
             EVP_DigestSignInit(
                 md_ctx.as_mut_ptr(),
-                &mut pctx,
+                &raw mut pctx,
                 md,
                 ptr::null_mut(),
                 self.0.as_ptr(),
@@ -371,7 +371,7 @@ impl EvpPkey {
                 EVP_DigestSign(
                     md_ctx.as_mut_ptr(),
                     ptr::null_mut(),
-                    &mut sig_len,
+                    &raw mut sig_len,
                     message.as_ptr(),
                     message.len(),
                 )
@@ -385,7 +385,7 @@ impl EvpPkey {
                 EVP_DigestSign(
                     md_ctx.as_mut_ptr(),
                     signature.as_mut_ptr(),
-                    &mut sig_len,
+                    &raw mut sig_len,
                     message.as_ptr(),
                     message.len(),
                 )
@@ -465,7 +465,7 @@ impl EvpPkey {
         if 1 != unsafe {
             EVP_DigestVerifyInit(
                 md_ctx.as_mut_ptr(),
-                &mut pctx,
+                &raw mut pctx,
                 md,
                 ptr::null_mut(),
                 self.0.as_ptr(),
@@ -520,13 +520,13 @@ impl EvpPkey {
                         .into(),
                 ));
             }
-            if 1 != EVP_PKEY_derive(pctx.as_mut_ptr(), ptr::null_mut(), &mut len) {
+            if 1 != EVP_PKEY_derive(pctx.as_mut_ptr(), ptr::null_mut(), &raw mut len) {
                 return Err(JoseError::InvalidKey("key agreement (ECDH) failed".into()));
             }
         }
         let mut out = mem::Zeroizing::new(vec![0; len].into_boxed_slice());
         unsafe {
-            if 1 != EVP_PKEY_derive(pctx.as_mut_ptr(), out.as_mut_ptr(), &mut len) {
+            if 1 != EVP_PKEY_derive(pctx.as_mut_ptr(), out.as_mut_ptr(), &raw mut len) {
                 return Err(JoseError::InvalidKey("key agreement (ECDH) failed".into()));
             }
         }
@@ -558,7 +558,11 @@ impl EvpPkey {
     pub(crate) fn from_private_key_der(der: &[u8]) -> Result<Self, JoseError> {
         let mut inp = der.as_ptr();
         let pkey = unsafe {
-            d2i_AutoPrivateKey(ptr::null_mut(), &mut inp, der.len() as std::os::raw::c_long)
+            d2i_AutoPrivateKey(
+                ptr::null_mut(),
+                &raw mut inp,
+                der.len() as std::os::raw::c_long,
+            )
         };
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid private key DER".into()));
@@ -569,8 +573,13 @@ impl EvpPkey {
     /// Parses a public key from SPKI DER.
     pub(crate) fn from_public_key_der(der: &[u8]) -> Result<Self, JoseError> {
         let mut inp = der.as_ptr();
-        let pkey =
-            unsafe { d2i_PUBKEY(ptr::null_mut(), &mut inp, der.len() as std::os::raw::c_long) };
+        let pkey = unsafe {
+            d2i_PUBKEY(
+                ptr::null_mut(),
+                &raw mut inp,
+                der.len() as std::os::raw::c_long,
+            )
+        };
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid public key DER".into()));
         }
@@ -628,7 +637,9 @@ impl EvpPkey {
 
     pub(crate) fn get_raw_private_key(&self) -> Option<Box<[u8]>> {
         let mut need = 0usize;
-        if 1 != unsafe { EVP_PKEY_get_raw_private_key(self.as_ptr(), ptr::null_mut(), &mut need) } {
+        if 1 != unsafe {
+            EVP_PKEY_get_raw_private_key(self.as_ptr(), ptr::null_mut(), &raw mut need)
+        } {
             return None;
         }
         unsafe {
@@ -637,7 +648,7 @@ impl EvpPkey {
                 1 == EVP_PKEY_get_raw_private_key(
                     self.as_ptr(),
                     b.as_mut_ptr() as *mut u8,
-                    &mut need
+                    &raw mut need
                 ),
                 "EVP_PKEY_get_raw_private_key() failed"
             );
@@ -647,7 +658,9 @@ impl EvpPkey {
 
     pub(crate) fn get_raw_public_key(&self) -> Option<Box<[u8]>> {
         let mut need = 0usize;
-        if 1 != unsafe { EVP_PKEY_get_raw_public_key(self.as_ptr(), ptr::null_mut(), &mut need) } {
+        if 1 != unsafe {
+            EVP_PKEY_get_raw_public_key(self.as_ptr(), ptr::null_mut(), &raw mut need)
+        } {
             return None;
         }
         unsafe {
@@ -656,7 +669,7 @@ impl EvpPkey {
                 1 == EVP_PKEY_get_raw_public_key(
                     self.as_ptr(),
                     b.as_mut_ptr() as *mut u8,
-                    &mut need
+                    &raw mut need
                 ),
                 "EVP_PKEY_get_raw_public_key() failed"
             );
@@ -751,7 +764,7 @@ impl EvpPkey {
                 EVP_PKEY_encrypt(
                     pctx.as_mut_ptr(),
                     ptr::null_mut(),
-                    &mut out_len,
+                    &raw mut out_len,
                     plaintext.as_ptr(),
                     plaintext.len(),
                 )
@@ -765,7 +778,7 @@ impl EvpPkey {
                 EVP_PKEY_encrypt(
                     pctx.as_mut_ptr(),
                     ciphertext.as_mut_ptr(),
-                    &mut out_len,
+                    &raw mut out_len,
                     plaintext.as_ptr(),
                     plaintext.len(),
                 )
@@ -793,7 +806,7 @@ impl EvpPkey {
                 EVP_PKEY_decrypt(
                     pctx.as_mut_ptr(),
                     ptr::null_mut(),
-                    &mut out_len,
+                    &raw mut out_len,
                     ciphertext.as_ptr(),
                     ciphertext.len(),
                 )
@@ -806,7 +819,7 @@ impl EvpPkey {
             EVP_PKEY_decrypt(
                 pctx.as_mut_ptr(),
                 plaintext.as_mut_ptr(),
-                &mut out_len,
+                &raw mut out_len,
                 ciphertext.as_ptr(),
                 ciphertext.len(),
             )
@@ -898,7 +911,7 @@ impl EvpPkeyCtx {
         let mut evp_pkey_ptr = ptr::null_mut::<EVP_PKEY>();
         unsafe {
             assert!(
-                1 == EVP_PKEY_paramgen(self.as_mut_ptr(), &mut evp_pkey_ptr),
+                1 == EVP_PKEY_paramgen(self.as_mut_ptr(), &raw mut evp_pkey_ptr),
                 "EVP_PKEY_paramgen() failed"
             );
         }
@@ -920,7 +933,7 @@ impl EvpPkeyCtx {
         let mut evp_pkey_ptr = ptr::null_mut::<EVP_PKEY>();
         unsafe {
             assert!(
-                1 == EVP_PKEY_keygen(self.as_mut_ptr(), &mut evp_pkey_ptr),
+                1 == EVP_PKEY_keygen(self.as_mut_ptr(), &raw mut evp_pkey_ptr),
                 "EVP_PKEY_keygen() failed"
             );
         }
@@ -996,7 +1009,7 @@ mod tests {
                 let signed = unsafe {
                     RSA_sign_pss_mgf1(
                         rsa.as_mut_ptr(),
-                        &mut signature_len,
+                        &raw mut signature_len,
                         signature.as_mut_ptr(),
                         signature.len(),
                         hash.as_ptr(),

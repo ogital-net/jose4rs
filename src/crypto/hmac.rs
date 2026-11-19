@@ -36,7 +36,7 @@ fn hmac_buf<'a>(
             data.as_ptr(),
             data.len(),
             buf.as_mut_ptr(),
-            &mut out_len,
+            &raw mut out_len,
         )
     };
     assert!(!ptr.is_null(), "HMAC() failed");
@@ -88,7 +88,7 @@ impl HmacCtx {
 
     pub(crate) fn finish_buf(self, buf: &mut [u8; digest::MAX_OUTPUT_LEN]) -> &[u8] {
         let mut out_len: std::ffi::c_uint = 0;
-        let res = unsafe { HMAC_Final(self.0.as_ptr(), buf.as_mut_ptr(), &mut out_len) };
+        let res = unsafe { HMAC_Final(self.0.as_ptr(), buf.as_mut_ptr(), &raw mut out_len) };
         assert!(res == 1, "HMAC_Final() failed");
         &buf[..out_len as usize]
     }

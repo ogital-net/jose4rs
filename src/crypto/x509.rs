@@ -21,7 +21,7 @@ impl X509Cert {
     pub(crate) fn from_der(der: &[u8]) -> Result<Self, JoseError> {
         // d2i_X509() advances the input pointer, so use a local copy.
         let mut ptr = der.as_ptr();
-        let x509 = unsafe { d2i_X509(ptr::null_mut(), &mut ptr, der.len() as _) };
+        let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut ptr, der.len() as _) };
         if x509.is_null() {
             return Err(JoseError::InvalidKey(
                 "invalid X.509 certificate DER".into(),
@@ -74,7 +74,7 @@ impl X509Cert {
         }
         let mut out = Vec::with_capacity(len as usize);
         let mut ptr = out.as_mut_ptr();
-        let written = unsafe { i2d_X509(self.0.as_ptr(), &mut ptr) };
+        let written = unsafe { i2d_X509(self.0.as_ptr(), &raw mut ptr) };
         if written != len {
             return Err(JoseError::InvalidKey(
                 "failed to encode X.509 certificate".into(),

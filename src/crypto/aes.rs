@@ -25,7 +25,7 @@ impl Drop for AesKey {
 
 impl AesKey {
     fn as_ptr(&self) -> *const AES_KEY {
-        &self.0
+        &raw const self.0
     }
 
     fn for_encryption(key: &[u8]) -> Self {
