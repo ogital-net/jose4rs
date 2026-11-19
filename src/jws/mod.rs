@@ -478,7 +478,6 @@ impl<'a> JsonWebSignature<'a> {
     }
 
     fn sign(
-        &self,
         alg: AlgorithmIdentifier,
         input: &[u8],
         key: &JsonWebKey,
@@ -1005,7 +1004,7 @@ impl<'a> JsonWebSignature<'a> {
             out_buffer.clone()
         };
 
-        let sig = self.sign(alg, &signing_input, key)?;
+        let sig = Self::sign(alg, &signing_input, key)?;
         match sig {
             Some(sig) => {
                 let s = base64::url_encode_append(sig, &mut out_buffer);
@@ -1122,7 +1121,7 @@ impl<'a> JsonWebSignature<'a> {
             base64::url_encode_append(payload.get(&self.buffer), &mut out);
         }
 
-        let sig = self.sign(alg, &out, key)?;
+        let sig = Self::sign(alg, &out, key)?;
         out.push(b'.');
 
         if let Some(sig) = sig {

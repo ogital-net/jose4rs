@@ -169,17 +169,17 @@ impl KeyManagementAlgorithm {
             KeyManagementAlgorithm::EcdhEsA256Kw => {
                 self.ecdh_es_encrypt(management_key, content_enc_alg, cek, headers, Some(32))
             }
-            KeyManagementAlgorithm::A128Kw => self.aes_kw_encrypt(management_key, cek, 16),
-            KeyManagementAlgorithm::A192Kw => self.aes_kw_encrypt(management_key, cek, 24),
-            KeyManagementAlgorithm::A256Kw => self.aes_kw_encrypt(management_key, cek, 32),
+            KeyManagementAlgorithm::A128Kw => Self::aes_kw_encrypt(management_key, cek, 16),
+            KeyManagementAlgorithm::A192Kw => Self::aes_kw_encrypt(management_key, cek, 24),
+            KeyManagementAlgorithm::A256Kw => Self::aes_kw_encrypt(management_key, cek, 32),
             KeyManagementAlgorithm::A128GcmKw => {
-                self.aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes128Gcm, headers)
+                Self::aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes128Gcm, headers)
             }
             KeyManagementAlgorithm::A192GcmKw => {
-                self.aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes192Gcm, headers)
+                Self::aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes192Gcm, headers)
             }
             KeyManagementAlgorithm::A256GcmKw => {
-                self.aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes256Gcm, headers)
+                Self::aes_gcm_kw_encrypt(management_key, cek, aead::Algorithm::Aes256Gcm, headers)
             }
             KeyManagementAlgorithm::Pbes2Hs256A128Kw => {
                 self.pbes2_encrypt(management_key, cek, DigestAlgorithm::Sha256, 16, headers)
@@ -634,7 +634,6 @@ impl KeyManagementAlgorithm {
     const PBES2_DEFAULT_SALT_LEN: usize = 12;
 
     fn aes_kw_encrypt(
-        &self,
         management_key: &JsonWebKey,
         cek: &[u8],
         kek_len: usize,
@@ -650,7 +649,6 @@ impl KeyManagementAlgorithm {
     }
 
     fn aes_gcm_kw_encrypt(
-        &self,
         management_key: &JsonWebKey,
         cek: &[u8],
         alg: aead::Algorithm,

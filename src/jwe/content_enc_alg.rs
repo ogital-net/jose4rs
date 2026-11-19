@@ -122,7 +122,6 @@ impl ContentEncryptionAlgorithm {
     }
 
     fn encrypt_aes_hmac(
-        &self,
         alg: HmacAlgorithm,
         plaintext: &[u8],
         aad: &[u8],
@@ -143,7 +142,6 @@ impl ContentEncryptionAlgorithm {
     }
 
     fn decrypt_aes_hmac<'a>(
-        &self,
         alg: HmacAlgorithm,
         ciphertext: &'a mut [u8],
         aad: &[u8],
@@ -157,7 +155,6 @@ impl ContentEncryptionAlgorithm {
     }
 
     fn encrypt_aead(
-        &self,
         alg: AeadAlgorithm,
         plaintext: &[u8],
         aad: &[u8],
@@ -178,7 +175,6 @@ impl ContentEncryptionAlgorithm {
     }
 
     fn decrypt_aead<'a>(
-        &self,
         alg: AeadAlgorithm,
         ciphertext: &'a mut [u8],
         aad: &[u8],
@@ -200,56 +196,56 @@ impl ContentEncryptionAlgorithm {
         iv: &[u8],
     ) -> Result<ContentEncryptionParts, JoseError> {
         match self {
-            ContentEncryptionAlgorithm::Aes128CbcHmacSha256 => self.encrypt_aes_hmac(
+            ContentEncryptionAlgorithm::Aes128CbcHmacSha256 => Self::encrypt_aes_hmac(
                 HmacAlgorithm::Aes128CbcHmacSha256,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::Aes192CbcHmacSha384 => self.encrypt_aes_hmac(
+            ContentEncryptionAlgorithm::Aes192CbcHmacSha384 => Self::encrypt_aes_hmac(
                 HmacAlgorithm::Aes192CbcHmacSha384,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::Aes256CbcHmacSha512 => self.encrypt_aes_hmac(
+            ContentEncryptionAlgorithm::Aes256CbcHmacSha512 => Self::encrypt_aes_hmac(
                 HmacAlgorithm::Aes256CbcHmacSha512,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::Aes128Gcm => self.encrypt_aead(
+            ContentEncryptionAlgorithm::Aes128Gcm => Self::encrypt_aead(
                 AeadAlgorithm::Aes128Gcm,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::Aes192Gcm => self.encrypt_aead(
+            ContentEncryptionAlgorithm::Aes192Gcm => Self::encrypt_aead(
                 AeadAlgorithm::Aes192Gcm,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::Aes256Gcm => self.encrypt_aead(
+            ContentEncryptionAlgorithm::Aes256Gcm => Self::encrypt_aead(
                 AeadAlgorithm::Aes256Gcm,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::ChaCha20Poly1305 => self.encrypt_aead(
+            ContentEncryptionAlgorithm::ChaCha20Poly1305 => Self::encrypt_aead(
                 AeadAlgorithm::ChaCha20Poly1305,
                 plaintext,
                 aad,
                 content_encryption_key,
                 iv,
             ),
-            ContentEncryptionAlgorithm::XChaCha20Poly1305 => self.encrypt_aead(
+            ContentEncryptionAlgorithm::XChaCha20Poly1305 => Self::encrypt_aead(
                 AeadAlgorithm::XChaCha20Poly1305,
                 plaintext,
                 aad,
@@ -270,7 +266,7 @@ impl ContentEncryptionAlgorithm {
         match self {
             ContentEncryptionAlgorithm::Aes128CbcHmacSha256 => {
                 let alg = HmacAlgorithm::Aes128CbcHmacSha256;
-                self.decrypt_aes_hmac(
+                Self::decrypt_aes_hmac(
                     alg,
                     ciphertext,
                     aad,
@@ -281,7 +277,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::Aes192CbcHmacSha384 => {
                 let alg = HmacAlgorithm::Aes192CbcHmacSha384;
-                self.decrypt_aes_hmac(
+                Self::decrypt_aes_hmac(
                     alg,
                     ciphertext,
                     aad,
@@ -292,7 +288,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::Aes256CbcHmacSha512 => {
                 let alg = HmacAlgorithm::Aes256CbcHmacSha512;
-                self.decrypt_aes_hmac(
+                Self::decrypt_aes_hmac(
                     alg,
                     ciphertext,
                     aad,
@@ -303,7 +299,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::Aes128Gcm => {
                 let alg = AeadAlgorithm::Aes128Gcm;
-                self.decrypt_aead(
+                Self::decrypt_aead(
                     alg,
                     ciphertext,
                     aad,
@@ -314,7 +310,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::Aes192Gcm => {
                 let alg = AeadAlgorithm::Aes192Gcm;
-                self.decrypt_aead(
+                Self::decrypt_aead(
                     alg,
                     ciphertext,
                     aad,
@@ -325,7 +321,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::Aes256Gcm => {
                 let alg = AeadAlgorithm::Aes256Gcm;
-                self.decrypt_aead(
+                Self::decrypt_aead(
                     alg,
                     ciphertext,
                     aad,
@@ -336,7 +332,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::ChaCha20Poly1305 => {
                 let alg = AeadAlgorithm::ChaCha20Poly1305;
-                self.decrypt_aead(
+                Self::decrypt_aead(
                     alg,
                     ciphertext,
                     aad,
@@ -347,7 +343,7 @@ impl ContentEncryptionAlgorithm {
             }
             ContentEncryptionAlgorithm::XChaCha20Poly1305 => {
                 let alg = AeadAlgorithm::XChaCha20Poly1305;
-                self.decrypt_aead(
+                Self::decrypt_aead(
                     alg,
                     ciphertext,
                     aad,
@@ -404,16 +400,14 @@ mod tests {
         let iv: [u8; 12] = [227, 197, 117, 252, 2, 219, 233, 68, 180, 225, 77, 219];
 
         let aad = encoded_header;
-        let alg = ContentEncryptionAlgorithm::Aes256Gcm;
-        let parts = alg
-            .encrypt_aead(
-                AeadAlgorithm::Aes256Gcm,
-                plaintext,
-                aad,
-                &content_enc_key,
-                &iv,
-            )
-            .unwrap();
+        let parts = ContentEncryptionAlgorithm::encrypt_aead(
+            AeadAlgorithm::Aes256Gcm,
+            plaintext,
+            aad,
+            &content_enc_key,
+            &iv,
+        )
+        .unwrap();
 
         let expected_ciphertext =
             b"5eym8TW_c8SuK0ltJ3rpYIzOeDQz7TALvtu6UG9oMo4vpzs9tX_EFShS8iB7j6ji\
@@ -448,17 +442,15 @@ mod tests {
         let expected_plaintext = b"The true sign of intelligence is \
             not knowledge but imagination.";
 
-        let alg = ContentEncryptionAlgorithm::Aes256Gcm;
-        let plaintext = alg
-            .decrypt_aead(
-                AeadAlgorithm::Aes256Gcm,
-                &mut ciphertext,
-                aad,
-                &content_enc_key,
-                &iv,
-                &auth_tag,
-            )
-            .unwrap();
+        let plaintext = ContentEncryptionAlgorithm::decrypt_aead(
+            AeadAlgorithm::Aes256Gcm,
+            &mut ciphertext,
+            aad,
+            &content_enc_key,
+            &iv,
+            &auth_tag,
+        )
+        .unwrap();
 
         assert_eq!(plaintext, expected_plaintext);
     }
@@ -478,16 +470,14 @@ mod tests {
 
         let aad = encoded_header;
 
-        let alg = ContentEncryptionAlgorithm::Aes128CbcHmacSha256;
-        let parts = alg
-            .encrypt_aes_hmac(
-                HmacAlgorithm::Aes128CbcHmacSha256,
-                plaintext,
-                aad,
-                &content_enc_key,
-                &iv,
-            )
-            .unwrap();
+        let parts = ContentEncryptionAlgorithm::encrypt_aes_hmac(
+            HmacAlgorithm::Aes128CbcHmacSha256,
+            plaintext,
+            aad,
+            &content_enc_key,
+            &iv,
+        )
+        .unwrap();
 
         let expected_ciphertext = b"KDlTtXchhZTGufMYmOYGS4HffxPSUrfmqCHXaI9wOGY";
         let expected_auth_tag = b"9hH0vgRfYgPnAHOd8stkvw";
@@ -520,17 +510,15 @@ mod tests {
         let aad = encoded_header;
         let expected_plaintext = b"Live long and prosper.";
 
-        let alg = ContentEncryptionAlgorithm::Aes128CbcHmacSha256;
-        let plaintext = alg
-            .decrypt_aes_hmac(
-                HmacAlgorithm::Aes128CbcHmacSha256,
-                &mut ciphertext,
-                aad,
-                &content_enc_key,
-                &iv,
-                &auth_tag,
-            )
-            .unwrap();
+        let plaintext = ContentEncryptionAlgorithm::decrypt_aes_hmac(
+            HmacAlgorithm::Aes128CbcHmacSha256,
+            &mut ciphertext,
+            aad,
+            &content_enc_key,
+            &iv,
+            &auth_tag,
+        )
+        .unwrap();
 
         assert_eq!(plaintext, expected_plaintext);
     }
