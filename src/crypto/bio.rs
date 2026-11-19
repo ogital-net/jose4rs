@@ -2,14 +2,14 @@ use std::{mem::MaybeUninit, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    BIO, BIO_free_all, BIO_mem_contents, BIO_new, BIO_new_mem_buf, BIO_s_mem, BIO_up_ref,
-    PEM_read_bio_PUBKEY, PEM_read_bio_PrivateKey,
+    BIO, BIO_free_all, BIO_mem_contents, BIO_new, BIO_new_mem_buf, BIO_s_mem, PEM_read_bio_PUBKEY,
+    PEM_read_bio_PrivateKey,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    BIO, BIO_free_all, BIO_mem_contents, BIO_new, BIO_new_mem_buf, BIO_s_mem, BIO_up_ref,
-    PEM_read_bio_PUBKEY, PEM_read_bio_PrivateKey,
+    BIO, BIO_free_all, BIO_mem_contents, BIO_new, BIO_new_mem_buf, BIO_s_mem, PEM_read_bio_PUBKEY,
+    PEM_read_bio_PrivateKey,
 };
 
 use super::{EvpPkey, X509Cert};
@@ -93,16 +93,6 @@ impl Bio {
 
     pub(crate) fn read_pem_x509(mut self) -> Option<X509Cert> {
         X509Cert::from_pem_bio(&mut self)
-    }
-}
-
-impl Clone for Bio {
-    fn clone(&self) -> Self {
-        let ptr = self.0;
-        unsafe {
-            assert!(1 == BIO_up_ref(ptr.as_ptr()), "BIO_up_ref() failed");
-        }
-        Self(ptr)
     }
 }
 

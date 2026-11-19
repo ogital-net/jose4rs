@@ -153,7 +153,11 @@ impl Algorithm {
 pub(crate) const MAX_OUTPUT_LEN: usize = 512 / 8;
 
 /// Hashes `data` into the caller-supplied `buf`, returning the written slice.
-pub(crate) fn digest_buf(md: Algorithm, data: impl AsRef<[u8]>, buf: &mut [u8]) -> &[u8] {
+pub(crate) fn digest_buf(
+    md: Algorithm,
+    data: impl AsRef<[u8]>,
+    buf: &mut [u8; MAX_OUTPUT_LEN],
+) -> &[u8] {
     let data = data.as_ref();
     let len = md.output_len();
     debug_assert!(buf.len() >= len);

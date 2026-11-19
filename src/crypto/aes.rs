@@ -44,7 +44,7 @@ impl AesKey {
     }
 
     fn for_decryption(key: &[u8]) -> Self {
-        let mut aes_key = MaybeUninit::<AES_KEY>::uninit();
+        let mut aes_key = MaybeUninit::<AES_KEY>::zeroed();
         unsafe {
             assert!(
                 0 == AES_set_decrypt_key(
@@ -61,7 +61,7 @@ impl AesKey {
 
 pub(crate) fn wrap_key(
     aes_key: &[u8],
-    iv: Option<&[u8]>,
+    iv: Option<&[u8; 8]>,
     src: &[u8],
 ) -> Result<Box<[u8]>, JoseError> {
     let mut out = Box::<[u8]>::new_uninit_slice(src.len() + 8);
@@ -72,7 +72,7 @@ pub(crate) fn wrap_key(
 
 pub(crate) fn wrap_key_buf(
     aes_key: &[u8],
-    iv: Option<&[u8]>,
+    iv: Option<&[u8; 8]>,
     src: &[u8],
     dst: &mut [std::mem::MaybeUninit<u8>],
 ) -> Result<usize, JoseError> {
@@ -84,7 +84,7 @@ pub(crate) fn wrap_key_buf(
     let len = unsafe {
         AES_wrap_key(
             aes_key.as_ptr(),
-            iv.map_or(std::ptr::null(), <[u8]>::as_ptr),
+            iv.map_or(std::ptr::null(), |iv| iv.as_ptr()),
             dst.as_mut_ptr() as *mut u8,
             src.as_ptr(),
             src.len(),
@@ -98,7 +98,7 @@ pub(crate) fn wrap_key_buf(
 
 pub(crate) fn unwrap_key(
     aes_key: &[u8],
-    iv: Option<&[u8]>,
+    iv: Option<&[u8; 8]>,
     src: &[u8],
 ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
     // RFC 3394: the wrapped key is at least one 8-byte block plus the 8-byte
@@ -120,7 +120,7 @@ pub(crate) fn unwrap_key(
 
 pub(crate) fn unwrap_key_buf(
     aes_key: &[u8],
-    iv: Option<&[u8]>,
+    iv: Option<&[u8; 8]>,
     src: &[u8],
     dst: &mut [MaybeUninit<u8>],
 ) -> Result<usize, JoseError> {
@@ -131,7 +131,7 @@ pub(crate) fn unwrap_key_buf(
     let len = unsafe {
         AES_unwrap_key(
             aes_key.as_ptr(),
-            iv.map_or(std::ptr::null(), <[u8]>::as_ptr),
+            iv.map_or(std::ptr::null(), |iv| iv.as_ptr()),
             dst.as_mut_ptr() as *mut u8,
             src.as_ptr(),
             src.len(),

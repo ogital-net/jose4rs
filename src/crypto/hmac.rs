@@ -11,11 +11,11 @@ use crate::error::JoseError;
 
 use super::digest;
 
-pub(crate) fn hmac_buf(
+fn hmac_buf(
     md: digest::Algorithm,
     key: impl AsRef<[u8]>,
     data: impl AsRef<[u8]>,
-    buf: &mut [u8],
+    buf: &mut [u8; digest::MAX_OUTPUT_LEN],
 ) -> Result<&[u8], JoseError> {
     let key = key.as_ref();
     let data = data.as_ref();
@@ -92,7 +92,7 @@ impl HmacCtx {
         assert!(res == 1, "HMAC_Update() failed");
     }
 
-    pub(crate) fn finish_buf(self, buf: &mut [u8]) -> &[u8] {
+    pub(crate) fn finish_buf(self, buf: &mut [u8; digest::MAX_OUTPUT_LEN]) -> &[u8] {
         let mut out_len: std::ffi::c_uint = 0;
         let res = unsafe { HMAC_Final(self.0.as_ptr(), buf.as_mut_ptr(), &mut out_len) };
         assert!(res == 1, "HMAC_Final() failed");
