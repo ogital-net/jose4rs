@@ -59,6 +59,42 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
             });
         });
 
+        group.bench_function("jose4rs/setup", |b| {
+            b.iter(|| {
+                let mut jwe = JsonWebEncryption::new();
+                jwe.set_payload(PLAINTEXT);
+                jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
+                jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+                black_box(jwe);
+            });
+        });
+
+        group.bench_function("jose4rs/encrypt_only", |b| {
+            b.iter_batched(
+                || {
+                    let mut jwe = JsonWebEncryption::new();
+                    jwe.set_payload(PLAINTEXT);
+                    jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
+                    jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+                    jwe
+                },
+                |mut jwe| {
+                    jwe.encrypt(&jose4rs_key).unwrap();
+                    black_box(jwe);
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        });
+
+        let mut encrypted_jwe = JsonWebEncryption::new();
+        encrypted_jwe.set_payload(PLAINTEXT);
+        encrypted_jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
+        encrypted_jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+        encrypted_jwe.encrypt(&jose4rs_key).unwrap();
+        group.bench_function("jose4rs/serialization_only", |b| {
+            b.iter(|| black_box(encrypted_jwe.compact_serialization().unwrap()));
+        });
+
         group.finish();
     }
 
@@ -84,6 +120,41 @@ fn bench_jwe_a128kw(c: &mut Criterion) {
 
         group.finish();
     }
+}
+
+// -- JWE dir + A128GCM -------------------------------------------------------
+
+fn bench_jwe_direct(c: &mut Criterion) {
+    use jose4rs::jwe::{ContentEncryptionAlgorithm, JsonWebEncryption, KeyManagementAlgorithm};
+    use jose4rs::jwk::JsonWebKey;
+    use jose4rs::jwx::JsonWebStructure;
+
+    let key = [0x42u8; 16];
+    let key_json = r#"{"kty":"oct","k":"QkJCQkJCQkJCQkJCQkJCQg"}"#;
+    let jose4rs_key = JsonWebKey::from_json(key_json).unwrap();
+    let josekit_enc = josekit::jwe::Dir.encrypter_from_bytes(key).unwrap();
+    let mut josekit_header = josekit::jwe::JweHeader::new();
+    josekit_header.set_content_encryption("A128GCM");
+
+    let mut group = c.benchmark_group("jwe_direct_encrypt");
+    group.bench_function("jose4rs", |b| {
+        b.iter(|| {
+            let mut jwe = JsonWebEncryption::new();
+            jwe.set_payload(PLAINTEXT);
+            jwe.set_algorithm(KeyManagementAlgorithm::Direct);
+            jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+            jwe.encrypt(&jose4rs_key).unwrap();
+            black_box(jwe.compact_serialization().unwrap());
+        });
+    });
+    group.bench_function("josekit", |b| {
+        b.iter(|| {
+            black_box(
+                josekit::jwe::serialize_compact(PLAINTEXT, &josekit_header, &*josekit_enc).unwrap(),
+            );
+        });
+    });
+    group.finish();
 }
 
 // -- JWE RSA-OAEP + A256GCM -------------------------------------------------
@@ -174,5 +245,10 @@ fn bench_jwe_rsa_oaep(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_jwe_a128kw, bench_jwe_rsa_oaep);
+criterion_group!(
+    benches,
+    bench_jwe_a128kw,
+    bench_jwe_direct,
+    bench_jwe_rsa_oaep
+);
 criterion_main!(benches);
