@@ -180,6 +180,7 @@ impl OctetSequenceJsonWebKey {
         crypto_memcmp(&expected, signature)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
         let alg = value.get("alg").map(str::parse).transpose()?;
 

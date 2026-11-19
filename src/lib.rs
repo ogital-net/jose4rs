@@ -92,7 +92,6 @@
     clippy::struct_excessive_bools,
     clippy::match_wildcard_for_single_variants,
     clippy::trivially_copy_pass_by_ref,
-    clippy::needless_pass_by_value,
     clippy::items_after_statements,
     clippy::module_name_repetitions,
     clippy::elidable_lifetime_names,

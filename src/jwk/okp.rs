@@ -460,6 +460,7 @@ impl OkpJsonWebKey {
         self.evp_pkey.verify_eddsa(message, signature)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
         let x = value.get("x").map_or_else(
             || Err(JoseError::InvalidKey("missing 'x' parameter".to_string())),

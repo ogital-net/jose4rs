@@ -304,7 +304,10 @@ impl JwtClaims {
     /// Panics if the claims value is not a JSON object (only possible if it
     /// was parsed from a non-object document).
     pub fn set_audience(&mut self, audience: Vec<String>) {
-        let arr: Vec<simd_json::OwnedValue> = audience.iter().map(|s| s.as_str().into()).collect();
+        let arr: Vec<simd_json::OwnedValue> = audience
+            .into_iter()
+            .map(simd_json::OwnedValue::from)
+            .collect();
         self.inner.as_owned_mut().insert(AUDIENCE, arr).unwrap();
     }
 

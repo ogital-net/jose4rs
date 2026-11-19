@@ -391,6 +391,7 @@ impl EcJsonWebKey {
         ec.verify_concatenated(message, digest_alg, signature)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
         // Decode coordinates to raw bytes first so the exact field-octet length
         // can be enforced (RFC 7518 Section 6.2.1: coordinates MUST be exactly

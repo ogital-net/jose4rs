@@ -42,7 +42,7 @@ impl Algorithm for KeyManagementAlgorithm {}
 
 impl<A> AlgorithmConstraints<A>
 where
-    A: Clone + PartialEq + Display + Algorithm,
+    A: Copy + PartialEq + Display + Algorithm,
 {
     /// Creates a constraint set of the given type over the given algorithms.
     pub fn new(constraint_type: ConstraintType, algs: impl AsRef<[A]>) -> Self {

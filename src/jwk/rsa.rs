@@ -455,6 +455,7 @@ impl RsaJsonWebKey {
             .rsa_decrypt(RsaPadding::Pkcs1Oaep, digest_alg, plaintext)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
         let n = value
             .get("n")
