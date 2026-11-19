@@ -59,7 +59,7 @@ impl EvpCipherCtx {
         }
         let need = algorithm.encrypt_output_len(in_out.len());
         if need > in_out.capacity() {
-            in_out.reserve_exact(need - in_out.capacity());
+            in_out.reserve_exact(need - in_out.len());
         }
 
         assert!(

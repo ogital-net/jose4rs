@@ -52,6 +52,9 @@ impl Bio {
                 "BIO_mem_contents() failed"
             );
             let ptr = ptr.assume_init();
+            if len == 0 || ptr.is_null() {
+                return &[];
+            }
             std::slice::from_raw_parts(ptr, len)
         }
     }

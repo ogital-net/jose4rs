@@ -29,7 +29,7 @@ impl AesKey {
     }
 
     fn for_encryption(key: &[u8]) -> Self {
-        let mut aes_key = MaybeUninit::<AES_KEY>::uninit();
+        let mut aes_key = MaybeUninit::<AES_KEY>::zeroed();
         unsafe {
             assert!(
                 0 == AES_set_encrypt_key(
