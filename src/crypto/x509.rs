@@ -90,7 +90,7 @@ impl X509Cert {
     ///
     /// `Sha1` yields the `x5t` value, `Sha256` the `x5t#S256` value.
     pub(crate) fn thumbprint(&self, alg: digest::Algorithm) -> Result<String, JoseError> {
-        let digest = digest::digest(alg, self.to_der()?);
+        let digest = digest::digest(alg, &self.to_der()?);
         let encoded = base64::url_encode(&digest);
         // SAFETY: base64url output is valid UTF-8.
         Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())

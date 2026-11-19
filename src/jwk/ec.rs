@@ -417,7 +417,10 @@ impl EcJsonWebKey {
 
         let x = decode_coord("x")?;
         let y = decode_coord("y")?;
-        let d = value.get("d").map(BigNum::from_b64).transpose()?;
+        let d = value
+            .get("d")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
 
         let mut ec_key = EcKey::new(curve);
         let private = d.is_some();

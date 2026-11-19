@@ -10,14 +10,11 @@ use super::{digest, mem::Zeroizing};
 /// Derives a key using PBKDF2-HMAC as specified by RFC 8018 / PKCS #5.
 pub(crate) fn pbkdf2_hmac(
     md: digest::Algorithm,
-    password: impl AsRef<[u8]>,
-    salt: impl AsRef<[u8]>,
+    password: &[u8],
+    salt: &[u8],
     iterations: u32,
     out_len: usize,
 ) -> Result<Zeroizing<Box<[u8]>>, JoseError> {
-    let password = password.as_ref();
-    let salt = salt.as_ref();
-
     if iterations == 0 {
         return Err(JoseError::InvalidAlgorithm(
             "PBKDF2 iteration count must be positive".to_string(),

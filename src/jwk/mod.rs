@@ -637,7 +637,7 @@ impl JsonWebKey {
     /// Returns an error if the key's public components cannot be read.
     pub fn thumbprint(&self) -> Result<String, JoseError> {
         let canonical = self.thumbprint_canonical_json()?;
-        let digest = crate::crypto::digest(crate::crypto::DigestAlgorithm::Sha256, &*canonical);
+        let digest = crate::crypto::digest(crate::crypto::DigestAlgorithm::Sha256, &canonical);
         let encoded = crate::base64::url_encode(&digest);
         // SAFETY: base64url output is valid UTF-8.
         Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())

@@ -3,8 +3,7 @@ use aws_lc_sys::RAND_bytes;
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::RAND_bytes;
 
-pub(crate) fn rand_bytes_buf(mut dst: impl AsMut<[u8]>) {
-    let buf = dst.as_mut();
+pub(crate) fn rand_bytes_buf(buf: &mut [u8]) {
     if buf.is_empty() {
         return;
     }

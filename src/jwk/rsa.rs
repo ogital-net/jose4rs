@@ -456,14 +456,38 @@ impl RsaJsonWebKey {
     }
 
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let n = value.get("n").map(BigNum::from_b64).transpose()?;
-        let e = value.get("e").map(BigNum::from_b64).transpose()?;
-        let d = value.get("d").map(BigNum::from_b64).transpose()?;
-        let p = value.get("p").map(BigNum::from_b64).transpose()?;
-        let q = value.get("q").map(BigNum::from_b64).transpose()?;
-        let dp = value.get("dp").map(BigNum::from_b64).transpose()?;
-        let dq = value.get("dq").map(BigNum::from_b64).transpose()?;
-        let qi = value.get("qi").map(BigNum::from_b64).transpose()?;
+        let n = value
+            .get("n")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let e = value
+            .get("e")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let d = value
+            .get("d")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let p = value
+            .get("p")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let q = value
+            .get("q")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let dp = value
+            .get("dp")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let dq = value
+            .get("dq")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
+        let qi = value
+            .get("qi")
+            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .transpose()?;
 
         let mut rsa = Rsa::new();
         if n.is_none() {

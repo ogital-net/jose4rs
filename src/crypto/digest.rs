@@ -77,8 +77,7 @@ impl EvpMd {
         Self { ctx }
     }
 
-    pub fn update(&mut self, data: impl AsRef<[u8]>) {
-        let data = data.as_ref();
+    pub fn update(&mut self, data: &[u8]) {
         if data.is_empty() {
             return;
         }
@@ -153,12 +152,11 @@ impl Algorithm {
 pub(crate) const MAX_OUTPUT_LEN: usize = 512 / 8;
 
 /// Hashes `data` into the caller-supplied `buf`, returning the written slice.
-pub(crate) fn digest_buf(
+pub(crate) fn digest_buf<'a>(
     md: Algorithm,
-    data: impl AsRef<[u8]>,
-    buf: &mut [u8; MAX_OUTPUT_LEN],
-) -> &[u8] {
-    let data = data.as_ref();
+    data: &[u8],
+    buf: &'a mut [u8; MAX_OUTPUT_LEN],
+) -> &'a [u8] {
     let len = md.output_len();
     debug_assert!(buf.len() >= len);
     let out = unsafe {
@@ -173,7 +171,7 @@ pub(crate) fn digest_buf(
     &buf[..len]
 }
 
-pub(crate) fn digest(md: Algorithm, data: impl AsRef<[u8]>) -> Box<[u8]> {
+pub(crate) fn digest(md: Algorithm, data: &[u8]) -> Box<[u8]> {
     let mut buf = [0u8; MAX_OUTPUT_LEN];
     let hash = digest_buf(md, data, &mut buf);
     hash.into()

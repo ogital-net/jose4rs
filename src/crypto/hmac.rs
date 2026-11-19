@@ -11,14 +11,12 @@ use crate::error::JoseError;
 
 use super::digest;
 
-fn hmac_buf(
+fn hmac_buf<'a>(
     md: digest::Algorithm,
-    key: impl AsRef<[u8]>,
-    data: impl AsRef<[u8]>,
-    buf: &mut [u8; digest::MAX_OUTPUT_LEN],
-) -> Result<&[u8], JoseError> {
-    let key = key.as_ref();
-    let data = data.as_ref();
+    key: &[u8],
+    data: &[u8],
+    buf: &'a mut [u8; digest::MAX_OUTPUT_LEN],
+) -> Result<&'a [u8], JoseError> {
     let len = md.output_len();
     debug_assert!(buf.len() >= len);
 
@@ -45,11 +43,7 @@ fn hmac_buf(
     Ok(&buf[..out_len as usize])
 }
 
-pub(crate) fn hmac(
-    md: digest::Algorithm,
-    key: impl AsRef<[u8]>,
-    data: impl AsRef<[u8]>,
-) -> Result<Box<[u8]>, JoseError> {
+pub(crate) fn hmac(md: digest::Algorithm, key: &[u8], data: &[u8]) -> Result<Box<[u8]>, JoseError> {
     let mut buf = [0u8; digest::MAX_OUTPUT_LEN];
     let hash = hmac_buf(md, key, data, &mut buf)?;
     Ok(hash.into())
@@ -123,7 +117,7 @@ mod tests {
             digest::Algorithm::Sha512,
         ] {
             let key = rand::rand_bytes(alg.output_len());
-            let res = hmac(alg, key, &data).unwrap();
+            let res = hmac(alg, &key, &data).unwrap();
             assert_eq!(res.len(), alg.output_len());
             assert!(!res.starts_with(&[0, 0, 0, 0]));
         }

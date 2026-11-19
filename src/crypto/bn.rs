@@ -33,7 +33,7 @@ impl BigNum {
         unsafe { Self(ptr::NonNull::new_unchecked(dup)) }
     }
 
-    pub(crate) fn from_b64<T: AsRef<[u8]>>(b64: T) -> Result<Self, JoseError> {
+    pub(crate) fn from_b64(b64: &[u8]) -> Result<Self, JoseError> {
         let bytes = Zeroizing::new(base64::url_decode(b64)?);
         Ok(bytes.as_ref().into())
     }
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_from_b64() {
-        let bn = BigNum::from_b64("AQAB").unwrap();
+        let bn = BigNum::from_b64(b"AQAB").unwrap();
         assert_eq!(bn, 65537u32);
     }
 

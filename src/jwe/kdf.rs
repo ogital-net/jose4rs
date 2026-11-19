@@ -56,7 +56,7 @@ impl ConcatKDF {
 
         let mut derived_key_material = Vec::with_capacity(key_data_len_bytes);
         for i in 0..reps {
-            md.update(((i + 1) as u32).to_be_bytes());
+            md.update(&((i + 1) as u32).to_be_bytes());
             md.update(shared_secret);
             md.update(algorithm_id);
             md.update(party_u_info);
