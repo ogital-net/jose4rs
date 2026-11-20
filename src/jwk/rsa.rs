@@ -4,7 +4,7 @@ use crate::{
     base64,
     crypto::{
         BigNum, DigestAlgorithm, EvpPkey, EvpPkeyType, Rsa, RsaPadding, RsaParam, X509Cert,
-        mem::Zeroizing,
+        mem::{Zeroizing, ZeroizingVec, cleanse},
     },
     error::JoseError,
 };
@@ -454,38 +454,30 @@ impl RsaJsonWebKey {
 
     #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let n = value
-            .get("n")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let e = value
-            .get("e")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let d = value
-            .get("d")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let p = value
-            .get("p")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let q = value
-            .get("q")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let dp = value
-            .get("dp")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let dq = value
-            .get("dq")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
-        let qi = value
-            .get("qi")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
-            .transpose()?;
+        let mut scratch = ZeroizingVec::new(Vec::new());
+        let mut decode_param = |key: &str| -> Result<Option<BigNum>, JoseError> {
+            value
+                .get(key)
+                .map(|encoded| {
+                    scratch.append_with(base64::url_decode_size(encoded.len()), |dst| {
+                        base64::url_decode_append(encoded, dst)
+                    })?;
+                    let param = BigNum::from(scratch.as_slice());
+                    cleanse(scratch.as_mut_slice());
+                    scratch.truncate(0);
+                    Ok(param)
+                })
+                .transpose()
+        };
+        let n = decode_param("n")?;
+        let e = decode_param("e")?;
+        let d = decode_param("d")?;
+        let p = decode_param("p")?;
+        let q = decode_param("q")?;
+        let dp = decode_param("dp")?;
+        let dq = decode_param("dq")?;
+        let qi = decode_param("qi")?;
+        drop(scratch);
 
         let mut rsa = Rsa::new();
         if n.is_none() {

@@ -420,7 +420,10 @@ impl EcJsonWebKey {
         let y = decode_coord("y")?;
         let d = value
             .get("d")
-            .map(|value| BigNum::from_b64(value.as_bytes()))
+            .map(|encoded| -> Result<BigNum, JoseError> {
+                let bytes = Zeroizing::new(crate::base64::url_decode(encoded)?);
+                Ok(bytes.as_ref().into())
+            })
             .transpose()?;
 
         let mut ec_key = EcKey::new(curve);

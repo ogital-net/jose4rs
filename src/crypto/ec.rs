@@ -150,8 +150,7 @@ pub(crate) struct EcKey(ptr::NonNull<EC_KEY>);
 impl EcKey {
     pub(crate) fn new(curve: Curve) -> Self {
         let ptr = unsafe { EC_KEY_new_by_curve_name(curve.into()) };
-        assert!(!ptr.is_null(), "EC_KEY_new_by_curve_name() failed");
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("EC_KEY_new_by_curve_name() failed"))
     }
 
     pub(crate) fn as_mut_ptr(&mut self) -> *mut EC_KEY {

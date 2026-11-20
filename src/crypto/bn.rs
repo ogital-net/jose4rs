@@ -14,15 +14,14 @@ use boring_sys::{
     OPENSSL_free,
 };
 
-use crate::{base64, crypto::mem::Zeroizing, error::JoseError};
+use crate::{base64, crypto::mem::Zeroizing};
 
 pub(crate) struct BigNum(ptr::NonNull<BIGNUM>);
 
 impl BigNum {
     pub(crate) fn new() -> Self {
         let ptr = unsafe { BN_new() };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("BN_new() failed"))
     }
 
     /// Creates an owned copy from a const (borrowed) BIGNUM pointer.
@@ -32,13 +31,7 @@ impl BigNum {
     pub(super) unsafe fn dup(ptr: *const BIGNUM) -> Self {
         assert!(!ptr.is_null());
         let dup = unsafe { BN_dup(ptr) };
-        assert!(!dup.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(dup)) }
-    }
-
-    pub(crate) fn from_b64(b64: &[u8]) -> Result<Self, JoseError> {
-        let bytes = Zeroizing::new(base64::url_decode(b64)?);
-        Ok(bytes.as_ref().into())
+        Self(ptr::NonNull::new(dup).expect("BN_dup() failed"))
     }
 
     /// Returns the base64url encoding of this value left-padded with zero
@@ -247,8 +240,7 @@ impl Drop for BigNum {
 impl Clone for BigNum {
     fn clone(&self) -> Self {
         let ptr = unsafe { BN_dup(self.as_ptr()) };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("BN_dup() failed"))
     }
 }
 
@@ -267,8 +259,7 @@ impl fmt::Debug for BigNum {
 impl From<&[u8]> for BigNum {
     fn from(value: &[u8]) -> Self {
         let ptr = unsafe { BN_bin2bn(value.as_ptr(), value.len(), ptr::null_mut()) };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("BN_bin2bn() failed"))
     }
 }
 
@@ -381,12 +372,6 @@ mod tests {
         assert!(bn2 > 10u32);
         assert_eq!(bn1.partial_cmp(&10u32), Some(std::cmp::Ordering::Equal));
         assert_eq!(bn2.partial_cmp(&15u32), Some(std::cmp::Ordering::Greater));
-    }
-
-    #[test]
-    fn test_from_b64() {
-        let bn = BigNum::from_b64(b"AQAB").unwrap();
-        assert_eq!(bn, 65537u32);
     }
 
     #[test]

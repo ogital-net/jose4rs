@@ -639,7 +639,7 @@ impl JsonWebKey {
         let digest = crate::crypto::digest(crate::crypto::DigestAlgorithm::Sha256, &canonical);
         let encoded = crate::base64::url_encode(&digest);
         // SAFETY: base64url output is valid UTF-8.
-        Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())
+        Ok(unsafe { String::from_utf8_unchecked(encoded.into_vec()) })
     }
 
     /// Returns the [RFC 9278](https://www.rfc-editor.org/rfc/rfc9278) JWK

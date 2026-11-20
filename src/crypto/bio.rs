@@ -18,11 +18,11 @@ pub(crate) struct Bio<'a>(ptr::NonNull<BIO>, PhantomData<&'a [u8]>);
 
 impl Bio<'static> {
     pub(crate) fn new() -> Self {
-        unsafe {
-            let ptr = BIO_new(BIO_s_mem());
-            assert!(!ptr.is_null(), "BIO_new() failed");
-            Self(ptr::NonNull::new_unchecked(ptr), PhantomData)
-        }
+        let ptr = unsafe { BIO_new(BIO_s_mem()) };
+        Self(
+            ptr::NonNull::new(ptr).expect("BIO_new() failed"),
+            PhantomData,
+        )
     }
 }
 

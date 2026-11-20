@@ -80,13 +80,13 @@ impl MlDsaKey {
         let mut pkey: *mut EVP_PKEY = ptr::null_mut();
         let rc = unsafe { EVP_PKEY_keygen(ctx, &mut pkey) };
         unsafe { EVP_PKEY_CTX_free(ctx) };
-        if rc != 1 || pkey.is_null() {
-            return Err(JoseError::InvalidKey(format!(
+        match (rc, ptr::NonNull::new(pkey)) {
+            (1, Some(pkey)) => Ok(Self(pkey)),
+            _ => Err(JoseError::InvalidKey(format!(
                 "EVP_PKEY_keygen failed for {}",
                 params.jose_name()
-            )));
+            ))),
         }
-        Ok(Self(unsafe { ptr::NonNull::new_unchecked(pkey) }))
     }
 
     /// Loads an ML-DSA private key from a 32-byte seed (RFC 9964 Section 4 form).
@@ -111,16 +111,12 @@ impl MlDsaKey {
             // `EVP_PKEY_new_raw_private_key` entry point does not currently
             // dispatch into the PQDSA code path and returns NULL for ML-DSA
             // NIDs even when the input is a valid seed.
-            let ptr = EVP_PKEY_pqdsa_new_raw_private_key(params.nid(), seed.as_ptr(), seed.len());
-            mem::cleanse(seed);
-            if ptr.is_null() {
-                return Err(JoseError::InvalidKey(
-                    "failed to construct ML-DSA key from seed".into(),
-                ));
-            }
-            ptr::NonNull::new_unchecked(ptr)
+            EVP_PKEY_pqdsa_new_raw_private_key(params.nid(), seed.as_ptr(), seed.len())
         };
-        Ok(Self(pkey))
+        mem::cleanse(seed);
+        ptr::NonNull::new(pkey)
+            .map(Self)
+            .ok_or_else(|| JoseError::InvalidKey("failed to construct ML-DSA key from seed".into()))
     }
 
     /// Returns the FIPS 204 raw public-key bytes.

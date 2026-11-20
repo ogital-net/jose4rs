@@ -142,8 +142,7 @@ pub(crate) struct EvpPkey(ptr::NonNull<EVP_PKEY>);
 impl EvpPkey {
     fn new() -> Self {
         let ptr = unsafe { EVP_PKEY_new() };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("EVP_PKEY_new() failed"))
     }
 
     pub(crate) fn new_raw_private_key(
@@ -855,16 +854,14 @@ struct EvpPkeyCtx(ptr::NonNull<EVP_PKEY_CTX>);
 impl EvpPkeyCtx {
     fn new(key_type: EvpPkeyType) -> Self {
         let ptr = unsafe { EVP_PKEY_CTX_new_id(key_type.into(), ptr::null_mut()) };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("EVP_PKEY_CTX_new_id() failed"))
     }
 
     fn from_key(key: &EvpPkey) -> Self {
         // EVP_PKEY_CTX_new() increments the reference count of the key
         // so we dont need to specify a lifetime for the EvpPkey reference
         let ptr = unsafe { EVP_PKEY_CTX_new(key.0.as_ptr(), ptr::null_mut()) };
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
+        Self(ptr::NonNull::new(ptr).expect("EVP_PKEY_CTX_new() failed"))
     }
 
     fn as_mut_ptr(&mut self) -> *mut EVP_PKEY_CTX {

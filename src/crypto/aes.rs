@@ -70,7 +70,7 @@ pub(crate) fn wrap_key(
     Ok(unsafe { out.assume_init() })
 }
 
-pub(crate) fn wrap_key_buf(
+fn wrap_key_buf(
     aes_key: &[u8],
     iv: Option<&[u8; 8]>,
     src: &[u8],
@@ -118,7 +118,7 @@ pub(crate) fn unwrap_key(
     Ok(unsafe { out.assume_init() })
 }
 
-pub(crate) fn unwrap_key_buf(
+fn unwrap_key_buf(
     aes_key: &[u8],
     iv: Option<&[u8; 8]>,
     src: &[u8],

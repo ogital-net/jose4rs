@@ -65,8 +65,7 @@ impl HmacCtx {
         }
 
         let ptr = unsafe { HMAC_CTX_new() };
-        assert!(!ptr.is_null(), "HMAC_CTX_new() failed");
-        let ctx = unsafe { Self(std::ptr::NonNull::new_unchecked(ptr)) };
+        let ctx = Self(std::ptr::NonNull::new(ptr).expect("HMAC_CTX_new() failed"));
 
         let res = unsafe {
             HMAC_Init_ex(

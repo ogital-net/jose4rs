@@ -22,12 +22,9 @@ impl X509Cert {
         // d2i_X509() advances the input pointer, so use a local copy.
         let mut ptr = der.as_ptr();
         let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut ptr, der.len() as _) };
-        if x509.is_null() {
-            return Err(JoseError::InvalidKey(
-                "invalid X.509 certificate DER".into(),
-            ));
-        }
-        unsafe { Ok(Self(ptr::NonNull::new_unchecked(x509))) }
+        ptr::NonNull::new(x509)
+            .map(Self)
+            .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate DER".into()))
     }
 
     /// Parses a PEM-encoded X.509 certificate.
@@ -41,11 +38,7 @@ impl X509Cert {
     pub(super) fn from_pem_bio(bio: &mut Bio<'_>) -> Option<Self> {
         let x509 =
             unsafe { PEM_read_bio_X509(bio.as_mut_ptr(), ptr::null_mut(), None, ptr::null_mut()) };
-        if x509.is_null() {
-            None
-        } else {
-            unsafe { Some(Self(ptr::NonNull::new_unchecked(x509))) }
-        }
+        ptr::NonNull::new(x509).map(Self)
     }
 
     /// Extracts the subject public key from the certificate.
@@ -92,7 +85,7 @@ impl X509Cert {
         let digest = digest::digest(alg, &self.to_der()?);
         let encoded = base64::url_encode(&digest);
         // SAFETY: base64url output is valid UTF-8.
-        Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())
+        Ok(unsafe { String::from_utf8_unchecked(encoded.into_vec()) })
     }
 }
 
