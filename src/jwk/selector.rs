@@ -6,8 +6,8 @@
 //! (`kid`, `alg`, and for ECDH-ES the `epk` key type) as plain arguments rather
 //! than referencing the JWS/JWE types, so `jwk` does not depend on `jws`/`jwe`.
 
-use super::{JsonWebKey, KeyUse};
-use crate::jws::AlgorithmIdentifier;
+use super::{JsonWebKey, JwkAlgorithm, KeyUse};
+use crate::{error::JoseError, jws::AlgorithmIdentifier};
 
 /// A criterion that a JWK either must have, or may omit.
 ///
@@ -98,6 +98,51 @@ impl VerificationJwkSelector {
         keys: &'k [JsonWebKey],
     ) -> Option<&'k JsonWebKey> {
         self.select_list(key_id, alg, keys).into_iter().next()
+    }
+
+    /// Returns the only key matching the signature algorithm and optional `kid`.
+    ///
+    /// Unlike [`Self::select`], this does not rank candidates. An explicit JWK
+    /// `alg` must match exactly; an omitted `alg` is allowed. Key type, signing
+    /// use, and any required curve must also match. Returns `Ok(None)` when
+    /// no key matches or the algorithm is `none`.
+    ///
+    /// This filters keys, but does not check algorithm policy or verify a
+    /// signature.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JoseError::InvalidKey`] if multiple keys match, even if a
+    /// `kid` was supplied or some keys have no `alg` metadata.
+    pub fn select_unique<'k>(
+        &self,
+        key_id: Option<&str>,
+        alg: AlgorithmIdentifier,
+        keys: &'k [JsonWebKey],
+    ) -> Result<Option<&'k JsonWebKey>, JoseError> {
+        if alg == AlgorithmIdentifier::None {
+            return Ok(None);
+        }
+        let expected_alg = JwkAlgorithm::Jws(alg);
+        let curve = if alg == AlgorithmIdentifier::EdDsa {
+            Some("Ed25519")
+        } else {
+            alg.ec_curve()
+        };
+        let mut candidates = keys.iter().filter(|key| {
+            Self::base_filter(key, key_id, Some(alg), KeyUse::Signature)
+                && key
+                    .jwk_algorithm()
+                    .is_none_or(|actual| *actual == expected_alg)
+                && curve.is_none_or(|expected| key.curve_name() == Some(expected))
+        });
+        let selected = candidates.next();
+        if candidates.next().is_some() {
+            return Err(JoseError::InvalidKey(
+                "multiple JWKs match the signature algorithm and key ID".into(),
+            ));
+        }
+        Ok(selected)
     }
 
     fn base_filter(
@@ -247,6 +292,36 @@ mod tests {
     }
 
     #[test]
+    fn test_unique_verification_enforces_algorithm_metadata_and_rejects_ambiguity() {
+        let selector = VerificationJwkSelector::new();
+        let alg = AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256;
+        let mismatched = format!(r#"{{"alg":"ES384",{}"#, &EC1[1..]);
+        let keys = set_with(&[&mismatched]);
+        assert!(selector.select(None, "ES256", keys.keys()).is_some());
+        assert!(
+            selector
+                .select_unique(None, alg, keys.keys())
+                .unwrap()
+                .is_none()
+        );
+
+        let matching = format!(r#"{{"alg":"ES256",{}"#, &EC1[1..]);
+        let keys = set_with(&[&matching, EC2_NO_KID]);
+        assert!(matches!(
+            selector.select_unique(None, alg, keys.keys()),
+            Err(JoseError::InvalidKey(_))
+        ));
+        assert_eq!(
+            selector
+                .select_unique(Some("the key"), alg, keys.keys())
+                .unwrap()
+                .unwrap()
+                .key_id(),
+            Some("the key")
+        );
+    }
+
+    #[test]
     fn test_verification_kty_from_alg() {
         // A set with an EC and (synthetically) the EC key can't be RSA, so use
         // two EC keys; the kty filter excludes non-EC. Build a mixed set.
@@ -354,6 +429,12 @@ mod tests {
 
         let keys = set_with(&[x25519]);
         assert!(selector.select(None, "Ed25519", keys.keys()).is_none());
+        assert!(
+            selector
+                .select_unique(None, AlgorithmIdentifier::EdDsa, keys.keys())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

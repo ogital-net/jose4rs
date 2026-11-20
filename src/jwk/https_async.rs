@@ -18,8 +18,8 @@ use super::https::{
     DEFAULT_CACHE_DURATION, DEFAULT_MINIMUM_CACHE_DURATION, FetchResponse,
     KID_MISS_REFRESH_COOLDOWN, REFRESH_REPRIEVE_THRESHOLD,
 };
-use super::{JsonWebKey, JsonWebKeySet};
-use crate::error::JoseError;
+use super::{JsonWebKey, JsonWebKeySet, VerificationJwkSelector};
+use crate::{error::JoseError, jws::AlgorithmIdentifier};
 
 /// A boxed future returned by [`AsyncJwksFetcher::fetch`].
 ///
@@ -391,8 +391,32 @@ impl AsyncHttpsJwks {
         alg: &str,
     ) -> Result<Option<JsonWebKey>, JoseError> {
         let keys = self.keys_with_refresh(kid).await?;
-        Ok(super::VerificationJwkSelector::new()
+        Ok(VerificationJwkSelector::new()
             .select(kid, alg, &keys)
+            .cloned())
+    }
+
+    /// Returns a unique verification key, refreshing the cache on a `kid` miss.
+    ///
+    /// Uses the strict filters of [`VerificationJwkSelector::select_unique`].
+    /// Returns `Ok(None)` when no key matches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if multiple keys match or if fetching fails and no
+    /// cached keys can be used.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal lock is poisoned.
+    pub async fn select_unique_verification_key(
+        &self,
+        kid: Option<&str>,
+        alg: AlgorithmIdentifier,
+    ) -> Result<Option<JsonWebKey>, JoseError> {
+        let keys = self.keys_with_refresh(kid).await?;
+        Ok(VerificationJwkSelector::new()
+            .select_unique(kid, alg, &keys)?
             .cloned())
     }
 
@@ -682,6 +706,14 @@ mod tests {
         // No kid: still matches by alg.
         let no_kid = block_on(jwks.select_verification_key(None, "ES256")).unwrap();
         assert!(no_kid.is_some());
+        assert!(
+            block_on(jwks.select_unique_verification_key(
+                None,
+                AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256
+            ))
+            .unwrap()
+            .is_some()
+        );
     }
 
     // ---------- seed / seed_from_json tests ----------

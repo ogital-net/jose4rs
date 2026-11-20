@@ -24,7 +24,7 @@ use crate::{
     error::JoseError,
     jwa::{AlgorithmConstraints, BLOCK_NONE},
     jwk::{JsonWebKey, JwkAlgorithm},
-    jwx::{HeaderParameter, JsonWebStructure},
+    jwx::JsonWebStructure,
 };
 
 const MIN_RSA_KEY_BITS: usize = 2048;
@@ -441,6 +441,22 @@ impl<'a> JsonWebSignature<'a> {
         self.algorithm_header_value()
     }
 
+    /// Reads the `alg` header as a supported signature algorithm.
+    ///
+    /// This does not authenticate the header or apply algorithm constraints.
+    /// Use [`AlgorithmConstraints::permits`] to check policy before key lookup.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `alg` is absent, is not a string, or names an
+    /// unsupported algorithm.
+    pub fn algorithm_identifier(&self) -> Result<AlgorithmIdentifier, JoseError> {
+        let alg = self
+            .algorithm()
+            .ok_or_else(|| JoseError::InvalidHeader("missing algorithm in header".into()))?;
+        AlgorithmIdentifier::try_from(alg)
+    }
+
     /// Returns the payload **without** verifying the signature.
     ///
     /// # Warning
@@ -667,10 +683,7 @@ impl<'a> JsonWebSignature<'a> {
     }
 
     fn get_algorithm(&self, check_constraints: bool) -> Result<AlgorithmIdentifier, JoseError> {
-        let alg = self
-            .header(HeaderParameter::Algorithm)
-            .ok_or_else(|| JoseError::InvalidHeader("missing algorithm in header".into()))?;
-        let alg = AlgorithmIdentifier::try_from(alg)?;
+        let alg = self.algorithm_identifier()?;
         if check_constraints {
             self.algorithm_constraints.check_constraint(alg)?;
         }
@@ -742,6 +755,15 @@ impl<'a> JsonWebSignature<'a> {
         // Callers that need a detached payload must re-set it after parsing.
         self.detached_payload = None;
         Ok(())
+    }
+
+    /// Returns whether the signing input uses a base64url-encoded payload.
+    ///
+    /// This is true by default and false for a parsed RFC 7797 `b64=false`
+    /// JWS or after calling [`Self::set_b64`] with `false`. JWTs must not use
+    /// unencoded payloads.
+    pub fn is_payload_base64url_encoded(&self) -> bool {
+        self.payload_is_b64
     }
 
     /// Sets whether the payload is base64url-encoded in the signing input
@@ -1513,14 +1535,17 @@ mod tests {
             .unwrap();
 
         let mut jws = JsonWebSignature::new();
+        assert!(jws.is_payload_base64url_encoded());
         jws.set_payload(b"$.02");
         jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
         jws.set_b64(false);
+        assert!(!jws.is_payload_base64url_encoded());
 
         let json = jws.flattened_json_serialization(&key).unwrap();
 
         // The protected header must carry b64:false + crit:["b64"].
         let parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
+        assert!(!parsed.is_payload_base64url_encoded());
         let header = parsed.header.as_ref().unwrap();
         assert_eq!(header.get("b64").unwrap().as_bool(), Some(false));
 
@@ -1811,6 +1836,27 @@ mod tests {
                 JsonWebSignature::from_flattened_json_serialization(&json_serialization).unwrap();
             assert_eq!(jws.payload(&key).unwrap(), payload);
         }
+    }
+
+    #[test]
+    fn test_algorithm_identifier_reads_supported_algorithms_without_applying_policy() {
+        let mut jws = JsonWebSignature::new();
+        assert!(matches!(
+            jws.algorithm_identifier(),
+            Err(JoseError::InvalidHeader(_))
+        ));
+        jws.set_algorithm_header_value("unknown");
+        assert!(jws.algorithm_identifier().is_err());
+
+        jws.set_algorithm(AlgorithmIdentifier::None);
+        assert_eq!(
+            jws.algorithm_identifier().unwrap(),
+            AlgorithmIdentifier::None
+        );
+        assert!(matches!(
+            jws.get_algorithm(true),
+            Err(JoseError::InvalidAlgorithm(_))
+        ));
     }
 
     #[test]

@@ -80,24 +80,28 @@ where
         }
     }
 
-    pub(crate) fn check_constraint(&self, algorithm: A) -> Result<(), JoseError> {
+    /// Returns whether this policy allows `algorithm`.
+    ///
+    /// Use this to apply the same policy before key lookup and during a
+    /// JOSE operation. An empty permit list rejects all algorithms; an empty
+    /// block list rejects none.
+    pub fn permits(&self, algorithm: A) -> bool {
+        let listed = self.algorithms.contains(&algorithm);
         match self.constraint_type {
-            ConstraintType::Permit => {
-                if !self.algorithms.contains(&algorithm) {
-                    return Err(JoseError::InvalidAlgorithm(format!(
-                        "'{algorithm}' is not a permitted algorithm"
-                    )));
-                }
-            }
-            ConstraintType::Block => {
-                if self.algorithms.contains(&algorithm) {
-                    return Err(JoseError::InvalidAlgorithm(format!(
-                        "'{algorithm}' is a blocked algorithm"
-                    )));
-                }
-            }
+            ConstraintType::Permit => listed,
+            ConstraintType::Block => !listed,
         }
-        Ok(())
+    }
+
+    pub(crate) fn check_constraint(&self, algorithm: A) -> Result<(), JoseError> {
+        if self.permits(algorithm) {
+            return Ok(());
+        }
+        let message = match self.constraint_type {
+            ConstraintType::Permit => format!("'{algorithm}' is not a permitted algorithm"),
+            ConstraintType::Block => format!("'{algorithm}' is a blocked algorithm"),
+        };
+        Err(JoseError::InvalidAlgorithm(message))
     }
 }
 
@@ -139,5 +143,22 @@ mod tests {
                 .check_constraint(AlgorithmIdentifier::None)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn test_permits_matches_constraint_enforcement() {
+        let alg = AlgorithmIdentifier::Ed25519;
+        let other = AlgorithmIdentifier::EdDsa;
+        for (mode, listed, unlisted) in [
+            (ConstraintType::Permit, true, false),
+            (ConstraintType::Block, false, true),
+        ] {
+            let constraints = AlgorithmConstraints::new(mode, [alg]);
+            for (candidate, expected) in [(alg, listed), (other, unlisted)] {
+                assert_eq!(constraints.permits(candidate), expected);
+                assert_eq!(constraints.check_constraint(candidate).is_ok(), expected);
+            }
+            assert_eq!(AlgorithmConstraints::new(mode, []).permits(alg), unlisted);
+        }
     }
 }

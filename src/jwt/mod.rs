@@ -578,8 +578,29 @@ impl JwtClaims {
         with_value!(self, |v| v.get(name).is_some())
     }
 
-    /// Reads a registered time claim (`exp`/`nbf`/`iat`) in a single lookup,
-    /// classifying it as absent, malformed, or an integer value.
+    /// Reads a named claim as a signed 64-bit JSON integer.
+    ///
+    /// Returns `Ok(None)` only if the claim is absent. This does not interpret
+    /// integers as timestamps or apply any bounds beyond the `i64` range.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::MALFORMED_CLAIM`] if the claim is present but is
+    /// not an integer in the `i64` range. JSON null and floating-point values
+    /// count as malformed.
+    pub fn integer_claim(&self, name: &str) -> Result<Option<i64>, InvalidJwtError> {
+        match self.time_claim(name) {
+            TimeClaim::Absent => Ok(None),
+            TimeClaim::Value(value) => Ok(Some(value)),
+            TimeClaim::Malformed => Err(InvalidJwtError::with_error_code(
+                format!("claim '{name}' must be an integer in the i64 range"),
+                ErrorCode::MALFORMED_CLAIM,
+            )),
+        }
+    }
+
+    /// Classifies an integer claim (including `exp`, `nbf`, and `iat`) in a
+    /// single lookup without constructing an error.
     pub(crate) fn time_claim(&self, name: &str) -> TimeClaim {
         with_value!(self, |v| {
             match v.get(name) {
@@ -726,6 +747,21 @@ mod tests {
         assert_eq!(claims.string_claim("cognito:groups"), None);
         // Absent claims return None.
         assert_eq!(claims.string_claim("missing"), None);
+    }
+
+    #[test]
+    fn test_integer_claim_distinguishes_absent_and_malformed() {
+        let claims = JwtClaims::parse(
+            br#"{"auth_time":123,"negative":-123,"null":null,"string":"123","float":123.0,"too_large":9223372036854775808}"#,
+        )
+        .unwrap();
+        assert_eq!(claims.integer_claim("auth_time").unwrap(), Some(123));
+        assert_eq!(claims.integer_claim("negative").unwrap(), Some(-123));
+        assert_eq!(claims.integer_claim("missing").unwrap(), None);
+        for name in ["null", "string", "float", "too_large"] {
+            let error = claims.integer_claim(name).unwrap_err();
+            assert!(error.has_error_code(ErrorCode::MALFORMED_CLAIM), "{name}");
+        }
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use super::{JsonWebKey, JsonWebKeySet, VerificationJwkSelector};
-use crate::error::JoseError;
+use crate::{error::JoseError, jws::AlgorithmIdentifier};
 
 /// The default cache lifetime, used when the response carries no usable
 /// cache directives. Matches jose4j's `defaultCacheDuration` of one hour.
@@ -453,6 +453,30 @@ impl HttpsJwks {
             .cloned())
     }
 
+    /// Returns a unique verification key, refreshing the cache on a `kid` miss.
+    ///
+    /// Uses the strict filters of [`VerificationJwkSelector::select_unique`].
+    /// Returns `Ok(None)` when no key matches.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if multiple keys match or if fetching fails and no
+    /// cached keys can be used.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal lock is poisoned.
+    pub fn select_unique_verification_key(
+        &self,
+        kid: Option<&str>,
+        alg: AlgorithmIdentifier,
+    ) -> Result<Option<JsonWebKey>, JoseError> {
+        let keys = self.keys_with_refresh(kid)?;
+        Ok(VerificationJwkSelector::new()
+            .select_unique(kid, alg, &keys)?
+            .cloned())
+    }
+
     /// Returns the key whose `kid` matches, refreshing once on a miss.
     ///
     /// Convenience wrapper over [`keys_with_refresh`](Self::keys_with_refresh)
@@ -852,6 +876,14 @@ mod tests {
         // No kid: still matches by alg.
         let no_kid = jwks.select_verification_key(None, "ES256").unwrap();
         assert!(no_kid.is_some());
+        assert!(
+            jwks.select_unique_verification_key(
+                None,
+                AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256
+            )
+            .unwrap()
+            .is_some()
+        );
     }
 
     // ---------- seed / seed_from_json tests ----------

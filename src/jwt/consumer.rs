@@ -77,6 +77,7 @@ impl ErrorCode {
     pub const MISCELLANEOUS: ErrorCode = ErrorCode(17);
     /// A registered time claim (`exp`/`nbf`/`iat`) was present but not an
     /// integer `NumericDate` (float, string, bool, null, or out of range).
+    /// Also used by [`JwtClaims::integer_claim`] for malformed custom claims.
     pub const MALFORMED_CLAIM: ErrorCode = ErrorCode(18);
     /// JWE encryption was required but missing. Not produced by the default
     /// claims pipeline (JWE is handled by `JsonWebEncryption` before claims
@@ -715,12 +716,18 @@ impl fmt::Debug for JwtConsumer<'_> {
 }
 
 impl JwtConsumer<'_> {
-    /// Process JWT claims and validate them
+    /// Parses and validates a UTF-8 JSON claims object from bytes or a string.
+    ///
+    /// This does not authenticate a token. Verify or decrypt it first as
+    /// required by the token's profile, then pass the resulting claims bytes.
     ///
     /// # Errors
     ///
     /// Returns an error if the claims cannot be parsed or fail validation.
-    pub fn process_to_claims(&self, claims: &str) -> Result<JwtClaims, InvalidJwtError> {
+    pub fn process_to_claims(
+        &self,
+        claims: impl AsRef<[u8]>,
+    ) -> Result<JwtClaims, InvalidJwtError> {
         let claims = JwtClaims::parse(claims)?;
         self.validate(&claims)?;
         Ok(claims)

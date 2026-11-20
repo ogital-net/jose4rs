@@ -47,28 +47,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     jws.set_algorithm_constraints(&constraints);
     jws.set_compact_serialization(compact_serialization)?;
 
-    // The JWS header indicates which key was used. The VerificationJwkSelector
-    // looks at the Key ID, key type (derived from alg), and designated use to
-    // select the appropriate key for verification from the set.
+    let alg = jws.algorithm_identifier()?;
+    if !constraints.permits(alg) {
+        return Err("JWS algorithm is not permitted".into());
+    }
     let selector = VerificationJwkSelector::new();
     let jwk = selector
-        .select(
-            jws.key_id_header_value(),
-            jws.algorithm().ok_or("missing alg header")?,
-            json_web_key_set.keys(),
-        )
+        .select_unique(jws.key_id_header_value(), alg, json_web_key_set.keys())?
         .ok_or("no matching verification key in JWKS")?;
     println!("Selected key with kid: {:?}", jwk.key_id());
 
-    // The verification key on the JWS is the public key from the JWK we pulled
-    // from the JWK Set.
-
-    // Check the signature.
-    let signature_verified = jws.verify_signature(jwk)?;
-    println!("JWS Signature is valid: {signature_verified}");
-    assert!(signature_verified);
-
-    // Get the payload, or signed content, from the JWS.
+    // Verify the signature and read the payload in one call.
     let payload = String::from_utf8_lossy(jws.payload(jwk)?);
     println!("JWS payload: {payload}");
 
