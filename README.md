@@ -1,6 +1,6 @@
 # jose4rs
 
-A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516]), JWK ([RFC 7517]), and JWT ([RFC 7519]) — ported from the Java [jose4j] library. Also implements [RFC 7797] (unencoded/detached JWS payloads) and the JWK thumbprint ([RFC 7638]).
+A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516]), JWK ([RFC 7517]), and JWT ([RFC 7519]) — ported from the Java [jose4j] library. Also implements [RFC 7797] (unencoded/detached JWS payloads), JWK thumbprints ([RFC 7638]), and JWK thumbprint URIs ([RFC 9278]).
 
 [RFC 7515]: https://tools.ietf.org/html/rfc7515
 [RFC 7516]: https://tools.ietf.org/html/rfc7516
@@ -8,6 +8,7 @@ A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516
 [RFC 7519]: https://tools.ietf.org/html/rfc7519
 [RFC 7797]: https://tools.ietf.org/html/rfc7797
 [RFC 7638]: https://tools.ietf.org/html/rfc7638
+[RFC 9278]: https://www.rfc-editor.org/rfc/rfc9278
 [RFC 9964]: https://tools.ietf.org/html/rfc9964
 [jose4j]: https://bitbucket.org/b_c/jose4j
 

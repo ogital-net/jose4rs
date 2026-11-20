@@ -642,6 +642,19 @@ impl JsonWebKey {
         Ok(unsafe { std::str::from_utf8_unchecked(&encoded) }.to_string())
     }
 
+    /// Returns the [RFC 9278](https://www.rfc-editor.org/rfc/rfc9278) JWK
+    /// thumbprint URI using SHA-256.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`Self::thumbprint`].
+    pub fn thumbprint_uri(&self) -> Result<String, JoseError> {
+        let thumbprint = self.thumbprint()?;
+        Ok(format!(
+            "urn:ietf:params:oauth:jwk-thumbprint:sha-256:{thumbprint}"
+        ))
+    }
+
     /// Builds the RFC 7638 canonical JSON straight from the key's components,
     /// so an `oct` key's `k` never passes through an unwiped intermediate.
     // SAFETY (each `from_utf8_unchecked`): base64url output is pure ASCII.
@@ -1794,10 +1807,9 @@ mod tests {
         assert_eq!(oct.x5t_s256(), None);
     }
 
-    /// RFC 7638 Section 3.1 known-answer vector: an RSA JWK and its SHA-256
-    /// thumbprint.
+    /// The RSA thumbprint from RFC 7638 Section 3.1 and its URI from RFC 9278 Section 6.
     #[test]
-    fn test_rfc7638_rsa_thumbprint() {
+    fn test_rsa_thumbprint_and_uri() {
         let jwk_json = r#"{
             "kty": "RSA",
             "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
@@ -1809,6 +1821,10 @@ mod tests {
         assert_eq!(
             jwk.thumbprint().unwrap(),
             "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
+        );
+        assert_eq!(
+            jwk.thumbprint_uri().unwrap(),
+            "urn:ietf:params:oauth:jwk-thumbprint:sha-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"
         );
     }
 
