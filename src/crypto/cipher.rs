@@ -75,6 +75,7 @@ impl EvpCipherCtx {
             "EVP_EncryptInit_ex() failed"
         );
 
+        #[allow(clippy::cast_sign_loss)]
         unsafe {
             let mut written: std::ffi::c_int = 0;
             assert!(
@@ -150,6 +151,7 @@ impl EvpCipherCtx {
 
         let mut end = 0usize;
 
+        #[allow(clippy::cast_sign_loss)]
         unsafe {
             let mut written: std::ffi::c_int = 0;
             assert_eq!(

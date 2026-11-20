@@ -95,7 +95,7 @@ impl EvpMd {
             assert!(
                 1 == EVP_DigestFinal_ex(
                     self.ctx.as_mut_ptr(),
-                    buf.as_mut_ptr() as *mut u8,
+                    buf.as_mut_ptr().cast::<u8>(),
                     std::ptr::null_mut()
                 ),
                 "EVP_DigestFinal_ex() failed"

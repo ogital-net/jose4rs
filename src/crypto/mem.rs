@@ -12,12 +12,12 @@ pub(crate) fn crypto_memcmp(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    unsafe { CRYPTO_memcmp(a.as_ptr() as *const _, b.as_ptr() as *const _, a.len()) == 0 }
+    unsafe { CRYPTO_memcmp(a.as_ptr().cast(), b.as_ptr().cast(), a.len()) == 0 }
 }
 
 pub(crate) fn cleanse(data: &mut [u8]) {
     unsafe {
-        OPENSSL_cleanse(data.as_mut_ptr() as *mut _, data.len());
+        OPENSSL_cleanse(data.as_mut_ptr().cast(), data.len());
     }
 }
 
@@ -213,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn zeroizing_vec_growth_preserves_contents() {
         let mut buffer = ZeroizingVec::new(Vec::new());
         for chunk in 0u8..64 {

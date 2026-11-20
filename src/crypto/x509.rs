@@ -21,7 +21,13 @@ impl X509Cert {
     pub(crate) fn from_der(der: &[u8]) -> Result<Self, JoseError> {
         // d2i_X509() advances the input pointer, so use a local copy.
         let mut ptr = der.as_ptr();
-        let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut ptr, der.len() as _) };
+        let x509 = unsafe {
+            d2i_X509(
+                ptr::null_mut(),
+                &raw mut ptr,
+                der.len().try_into().expect("slice too large"),
+            )
+        };
         ptr::NonNull::new(x509)
             .map(Self)
             .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate DER".into()))
@@ -59,12 +65,15 @@ impl X509Cert {
     fn to_der(&self) -> Result<Box<[u8]>, JoseError> {
         // First call with a null output pointer to size the buffer.
         let len = unsafe { i2d_X509(self.0.as_ptr(), ptr::null_mut()) };
-        if len <= 0 {
-            return Err(JoseError::InvalidKey(
-                "failed to encode X.509 certificate".into(),
-            ));
-        }
-        let mut out = Vec::with_capacity(len as usize);
+        let output_len = match usize::try_from(len) {
+            Ok(size) if size > 0 => size,
+            _ => {
+                return Err(JoseError::InvalidKey(
+                    "failed to encode X.509 certificate".into(),
+                ));
+            }
+        };
+        let mut out = Vec::with_capacity(output_len);
         let mut ptr = out.as_mut_ptr();
         let written = unsafe { i2d_X509(self.0.as_ptr(), &raw mut ptr) };
         if written != len {
@@ -72,8 +81,8 @@ impl X509Cert {
                 "failed to encode X.509 certificate".into(),
             ));
         }
-        // SAFETY: i2d_X509 wrote exactly `len` bytes.
-        unsafe { out.set_len(len as usize) };
+        // SAFETY: i2d_X509 wrote exactly `output_len` bytes.
+        unsafe { out.set_len(output_len) };
         Ok(out.into_boxed_slice())
     }
 

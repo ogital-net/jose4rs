@@ -48,6 +48,7 @@ pub const KID_MISS_REFRESH_COOLDOWN: Duration = Duration::from_secs(10);
 /// freshness metadata. Everything else (status handling, redirects, TLS) is
 /// the fetcher's concern; a non-2xx response should be surfaced as an `Err`.
 #[derive(Debug, Clone)]
+#[must_use]
 pub struct FetchResponse {
     /// The response body -- the JWKS JSON document.
     pub body: Vec<u8>,

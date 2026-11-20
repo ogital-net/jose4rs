@@ -28,8 +28,15 @@ impl Bio<'static> {
 
 impl<'a> Bio<'a> {
     /// Creates a read-only BIO that borrows the slice without copying it.
+    ///
+    /// N.B. Rust slices cannot exceed `isize::MAX` so the panic is not reachable in practice
     pub(crate) fn from_slice(slice: &'a [u8]) -> Self {
-        let ptr = unsafe { BIO_new_mem_buf(slice.as_ptr().cast(), slice.len() as isize) };
+        let ptr = unsafe {
+            BIO_new_mem_buf(
+                slice.as_ptr().cast(),
+                slice.len().try_into().expect("slice too large"),
+            )
+        };
         Self(
             ptr::NonNull::new(ptr).expect("BIO_new_mem_buf() failed"),
             PhantomData,

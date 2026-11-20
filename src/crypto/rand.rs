@@ -17,7 +17,7 @@ pub(crate) fn rand_bytes_buf(buf: &mut [u8]) {
 pub(crate) fn rand_bytes(len: usize) -> Box<[u8]> {
     let mut buf = Box::<[u8]>::new_uninit_slice(len);
     unsafe {
-        let result = RAND_bytes(buf.as_mut_ptr() as *mut u8, buf.len());
+        let result = RAND_bytes(buf.as_mut_ptr().cast::<u8>(), buf.len());
         // RAND_bytes returns 1 on success, 0 or -1 on failure
         assert!(result == 1, "RAND_bytes failed");
         buf.assume_init()

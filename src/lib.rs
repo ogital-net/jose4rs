@@ -74,26 +74,17 @@
 #![allow(
     // FFI-driven numeric/pointer casts in `src/crypto`; values are bounded by
     // the underlying C API contracts.
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_sign_loss,
-    clippy::cast_precision_loss,
-    clippy::ptr_as_ptr,
-    clippy::ref_as_ptr,
+    //clippy::cast_possible_wrap,
     // Stylistic preferences we don't enforce.
-    clippy::return_self_not_must_use,
     clippy::similar_names,
     clippy::many_single_char_names,
     clippy::unreadable_literal,
     clippy::too_many_lines,
-    clippy::struct_excessive_bools,
-    clippy::module_name_repetitions,
     clippy::elidable_lifetime_names,
     // Per-algorithm lookup tables keep one arm per variant for clarity, even
     // when some bodies coincide; and some crypto fns return `Result` to match
     // their erroring siblings even when a given path can't fail.
     clippy::match_same_arms,
-    clippy::unnecessary_wraps
 )]
 
 // The two cryptography backends are mutually exclusive: both provide the same

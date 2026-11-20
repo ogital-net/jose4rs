@@ -28,6 +28,7 @@ impl AesKey {
         &raw const self.0
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn for_encryption(key: &[u8]) -> Self {
         let mut aes_key = MaybeUninit::<AES_KEY>::zeroed();
         unsafe {
@@ -43,6 +44,7 @@ impl AesKey {
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn for_decryption(key: &[u8]) -> Self {
         let mut aes_key = MaybeUninit::<AES_KEY>::zeroed();
         unsafe {
@@ -85,15 +87,15 @@ fn wrap_key_buf(
         AES_wrap_key(
             aes_key.as_ptr(),
             iv.map_or(std::ptr::null(), |iv| iv.as_ptr()),
-            dst.as_mut_ptr() as *mut u8,
+            dst.as_mut_ptr().cast::<u8>(),
             src.as_ptr(),
             src.len(),
-        ) as i32
+        )
     };
-    if len <= 0 {
-        return Err(JoseError::new("AES key wrap failed"));
+    match len.try_into() {
+        Ok(written) if written > 0 => Ok(written),
+        _ => Err(JoseError::new("AES key wrap failed")),
     }
-    Ok(len as usize)
 }
 
 pub(crate) fn unwrap_key(
@@ -132,17 +134,17 @@ fn unwrap_key_buf(
         AES_unwrap_key(
             aes_key.as_ptr(),
             iv.map_or(std::ptr::null(), |iv| iv.as_ptr()),
-            dst.as_mut_ptr() as *mut u8,
+            dst.as_mut_ptr().cast::<u8>(),
             src.as_ptr(),
             src.len(),
-        ) as i32
+        )
     };
-    if len <= 0 {
-        return Err(JoseError::IntegrityError(
+    match len.try_into() {
+        Ok(written) if written > 0 => Ok(written),
+        _ => Err(JoseError::IntegrityError(
             "AES key unwrap failed (wrapped key integrity check failed)".into(),
-        ));
+        )),
     }
-    Ok(len as usize)
 }
 
 #[cfg(test)]

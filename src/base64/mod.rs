@@ -90,6 +90,7 @@ mod tests {
     /// Callers size secret-bearing buffers with `url_*_size`; the append
     /// helpers must never need more capacity than that, on either backend.
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
     fn test_append_fits_exact_size() {
         for len in 0..64usize {
             let bytes: Vec<u8> = (0..len).map(|i| i as u8 ^ 0x5a).collect();

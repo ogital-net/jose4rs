@@ -553,7 +553,7 @@ impl EvpPkey {
             d2i_AutoPrivateKey(
                 ptr::null_mut(),
                 &raw mut inp,
-                der.len() as std::os::raw::c_long,
+                der.len().try_into().expect("slice too large"),
             )
         };
         if pkey.is_null() {
@@ -569,7 +569,7 @@ impl EvpPkey {
             d2i_PUBKEY(
                 ptr::null_mut(),
                 &raw mut inp,
-                der.len() as std::os::raw::c_long,
+                der.len().try_into().expect("slice too large"),
             )
         };
         if pkey.is_null() {
@@ -629,7 +629,7 @@ impl EvpPkey {
             assert!(
                 1 == EVP_PKEY_get_raw_private_key(
                     self.as_ptr(),
-                    b.as_mut_ptr() as *mut u8,
+                    b.as_mut_ptr().cast::<u8>(),
                     &raw mut need
                 ),
                 "EVP_PKEY_get_raw_private_key() failed"
@@ -650,7 +650,7 @@ impl EvpPkey {
             assert!(
                 1 == EVP_PKEY_get_raw_public_key(
                     self.as_ptr(),
-                    b.as_mut_ptr() as *mut u8,
+                    b.as_mut_ptr().cast::<u8>(),
                     &raw mut need
                 ),
                 "EVP_PKEY_get_raw_public_key() failed"
@@ -963,6 +963,8 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_wrap)]
     fn test_rsa_pss_verification_requires_digest_length_salt() {
         let key = EvpPkey::generate_rsa(2048);
         let rsa = key.rsa().unwrap();

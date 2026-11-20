@@ -140,6 +140,7 @@ fn parse_cache_control(value: &str) -> Vec<CacheDirective> {
     out
 }
 
+#[allow(clippy::cast_possible_truncation)]
 fn parse_delta_seconds(value: &str) -> u64 {
     const MAX_DELTA_SECONDS: u64 = 2_147_483_648;
 

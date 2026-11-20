@@ -49,16 +49,16 @@ pub(crate) enum TimeClaim {
 /// A single-lookup snapshot of the `aud` claim, capturing everything the
 /// consumer's audience validation needs without re-querying the claims map.
 /// Checks membership directly against borrowed strings (no allocation).
-#[derive(Debug, Default)]
-pub(crate) struct AudienceInfo {
-    /// Present and not JSON null (null is treated as absent, matching jose4j).
-    pub present: bool,
+#[derive(Debug)]
+pub(crate) enum AudienceInfo {
+    /// Missing or JSON null (matching jose4j).
+    Absent,
     /// Present but neither a string nor an all-string array.
-    pub malformed: bool,
+    Malformed,
     /// Present as a plain JSON string (the RFC 7523 strict form).
-    pub is_string: bool,
-    /// At least one string matches a configured expected audience.
-    pub matches_expected: bool,
+    String { matches_expected: bool },
+    /// Present as an array of strings.
+    Array { matches_expected: bool },
 }
 
 /// Dispatch a read-only operation to the inner value regardless of variant.
@@ -338,10 +338,9 @@ impl JwtClaims {
     ///
     /// Panics if the given time is before the Unix epoch.
     pub fn set_expiration_time(&mut self, exp: SystemTime) {
-        let timestamp = exp.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
         self.inner
             .as_owned_mut()
-            .insert(EXPIRATION_TIME, timestamp)
+            .insert(EXPIRATION_TIME, timestamp(exp))
             .unwrap();
     }
 
@@ -368,10 +367,9 @@ impl JwtClaims {
     ///
     /// Panics if the given time is before the Unix epoch.
     pub fn set_not_before(&mut self, nbf: SystemTime) {
-        let timestamp = nbf.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
         self.inner
             .as_owned_mut()
-            .insert(NOT_BEFORE, timestamp)
+            .insert(NOT_BEFORE, timestamp(nbf))
             .unwrap();
     }
 
@@ -398,10 +396,9 @@ impl JwtClaims {
     ///
     /// Panics if the given time is before the Unix epoch.
     pub fn set_issued_at(&mut self, iat: SystemTime) {
-        let timestamp = iat.duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
         self.inner
             .as_owned_mut()
-            .insert(ISSUED_AT, timestamp)
+            .insert(ISSUED_AT, timestamp(iat))
             .unwrap();
     }
 
@@ -631,45 +628,30 @@ impl JwtClaims {
     pub(crate) fn audience_info(&self, expected: &[&str]) -> AudienceInfo {
         with_value!(self, |v| {
             let Some(aud) = v.get(AUDIENCE) else {
-                return AudienceInfo::default();
+                return AudienceInfo::Absent;
             };
             // A JSON null aud is treated as absent (matching jose4j's hasClaim).
             if aud.as_null().is_some() {
-                return AudienceInfo::default();
+                return AudienceInfo::Absent;
             }
-            if let Some(s) = aud.as_str() {
-                return AudienceInfo {
-                    present: true,
-                    malformed: false,
-                    is_string: true,
-                    matches_expected: expected.contains(&s),
+            if let Some(audience) = aud.as_str() {
+                return AudienceInfo::String {
+                    matches_expected: expected.contains(&audience),
                 };
             }
-            match aud.as_array() {
-                Some(arr) => {
-                    let mut info = AudienceInfo {
-                        present: true,
-                        ..AudienceInfo::default()
-                    };
-                    for el in arr {
-                        let Some(s) = el.as_str() else {
-                            info.malformed = true;
-                            break;
-                        };
-                        // Stop membership checks after a match, but keep type
-                        // checking: ["expected", 123] must still be rejected.
-                        info.matches_expected = info.matches_expected || expected.contains(&s);
-                    }
-                    info
-                }
-                // A non-string, non-array aud (number/object/bool) is malformed.
-                None => AudienceInfo {
-                    present: true,
-                    malformed: true,
-                    is_string: false,
-                    matches_expected: false,
-                },
+            let Some(elements) = aud.as_array() else {
+                return AudienceInfo::Malformed;
+            };
+            let mut matches_expected = false;
+            for element in elements {
+                let Some(audience) = element.as_str() else {
+                    return AudienceInfo::Malformed;
+                };
+                // Stop membership checks after a match, but keep type
+                // checking: ["expected", 123] must still be rejected.
+                matches_expected = matches_expected || expected.contains(&audience);
             }
+            AudienceInfo::Array { matches_expected }
         })
     }
 }
@@ -699,6 +681,14 @@ impl Clone for JwtClaims {
             inner: self.inner.clone(),
         }
     }
+}
+
+#[inline]
+fn timestamp(st: SystemTime) -> i64 {
+    st.duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .cast_signed()
 }
 
 #[cfg(test)]

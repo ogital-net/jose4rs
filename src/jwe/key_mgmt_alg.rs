@@ -8,7 +8,10 @@ use crate::{
     jwk::{JsonWebKey, JwkAlgorithm},
     jwx::HeaderParameter,
 };
-use simd_json::derived::{MutableObject, ValueObjectAccess, ValueObjectAccessAsScalar as _};
+use simd_json::{
+    base::ValueAsScalar as _,
+    derived::{MutableObject, ValueObjectAccess, ValueObjectAccessAsScalar as _},
+};
 
 /// Represents the key management algorithm identifiers for JWE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -582,11 +585,33 @@ impl KeyManagementAlgorithm {
 
     /// Maximum accepted PBES2 iteration count, mirroring jose4j's limit to
     /// guard against excessive resource utilization from hostile headers.
-    const PBES2_MAX_ITERATION_COUNT: i64 = 2_499_999;
+    const PBES2_MAX_ITERATION_COUNT: u32 = 2_499_999;
     /// Minimum accepted PBES2 iteration count. jose4j enforces this floor on
     /// encryption (citing the RFC 2898/JWA recommendation of >= 1000); applying
     /// it on decrypt too keeps a hostile header from weakening the KEK.
-    const PBES2_MIN_ITERATION_COUNT: i64 = 1000;
+    const PBES2_MIN_ITERATION_COUNT: u32 = 1000;
+
+    fn pbes2_iteration_count(headers: &simd_json::owned::Value) -> Result<Option<u32>, JoseError> {
+        let Some(value) = headers.get(HeaderParameter::Pbes2IterationCount.name()) else {
+            return Ok(None);
+        };
+        let iteration_count = value.as_i64().ok_or_else(|| {
+            JoseError::InvalidHeader(
+                "'p2c' header parameter must be a signed 64-bit integer".into(),
+            )
+        })?;
+        u32::try_from(iteration_count)
+            .ok()
+            .filter(|count| {
+                (Self::PBES2_MIN_ITERATION_COUNT..=Self::PBES2_MAX_ITERATION_COUNT).contains(count)
+            })
+            .map(Some)
+            .ok_or_else(|| {
+                JoseError::InvalidAlgorithm(format!(
+                    "PBES2 iteration count ({iteration_count}) out of acceptable range"
+                ))
+            })
+    }
 
     /// Derives the PBES2 key-encryption key per RFC 7518 section 4.8:
     /// PBKDF2 with salt = UTF8(alg) || 0x00 || p2s and the password as the key.
@@ -601,16 +626,8 @@ impl KeyManagementAlgorithm {
             .key_bytes()
             .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
 
-        let iteration_count = headers
-            .get_i64(HeaderParameter::Pbes2IterationCount.name())
+        let iteration_count = Self::pbes2_iteration_count(headers)?
             .ok_or_else(|| JoseError::InvalidHeader("missing 'p2c' header parameter".into()))?;
-        if !(Self::PBES2_MIN_ITERATION_COUNT..=Self::PBES2_MAX_ITERATION_COUNT)
-            .contains(&iteration_count)
-        {
-            return Err(JoseError::InvalidAlgorithm(format!(
-                "PBES2 iteration count ({iteration_count}) out of acceptable range"
-            )));
-        }
 
         let encoded_salt_input = headers
             .get_str(HeaderParameter::Pbes2SaltInput.name())
@@ -627,7 +644,7 @@ impl KeyManagementAlgorithm {
         salt.push(0);
         salt.extend_from_slice(&salt_input);
 
-        pbkdf2::pbkdf2_hmac(digest_alg, password, &salt, iteration_count as u32, kek_len)
+        pbkdf2::pbkdf2_hmac(digest_alg, password, &salt, iteration_count, kek_len)
     }
 
     /// Default PBES2 iteration count used for encryption, mirroring jose4j.
@@ -696,26 +713,15 @@ impl KeyManagementAlgorithm {
             .ok_or(JoseError::InvalidKey("invalid key type".into()))?;
 
         // Honor caller-provided p2c/p2s headers, otherwise generate defaults.
-        let iteration_count = match headers.get_i64(HeaderParameter::Pbes2IterationCount.name()) {
-            Some(c)
-                if (Self::PBES2_MIN_ITERATION_COUNT..=Self::PBES2_MAX_ITERATION_COUNT)
-                    .contains(&c) =>
-            {
-                c as u32
-            }
-            Some(_) => {
-                return Err(JoseError::InvalidAlgorithm(
-                    "PBES2 iteration count out of acceptable range".to_string(),
-                ));
-            }
-            None => {
-                set_header_u64(
-                    headers,
-                    HeaderParameter::Pbes2IterationCount.name(),
-                    u64::from(Self::PBES2_DEFAULT_ITERATION_COUNT),
-                )?;
-                Self::PBES2_DEFAULT_ITERATION_COUNT
-            }
+        let iteration_count = if let Some(count) = Self::pbes2_iteration_count(headers)? {
+            count
+        } else {
+            set_header_u64(
+                headers,
+                HeaderParameter::Pbes2IterationCount.name(),
+                u64::from(Self::PBES2_DEFAULT_ITERATION_COUNT),
+            )?;
+            Self::PBES2_DEFAULT_ITERATION_COUNT
         };
 
         let salt_input: Box<[u8]> =
@@ -893,6 +899,34 @@ impl fmt::Display for KeyManagementAlgorithm {
 mod tests {
     use super::*;
     use crate::jwk::JsonWebKey;
+
+    #[test]
+    fn pbes2_iteration_count_preserves_bounds_and_distinguishes_absence() {
+        let read_count = |json: &str| {
+            let headers = simd_json::to_owned_value(&mut json.as_bytes().to_vec()).unwrap();
+            KeyManagementAlgorithm::pbes2_iteration_count(&headers)
+        };
+        assert_eq!(read_count("{}").unwrap(), None);
+        assert_eq!(read_count(r#"{"p2c":1000}"#).unwrap(), Some(1000));
+        assert_eq!(read_count(r#"{"p2c":2499999}"#).unwrap(), Some(2_499_999));
+        for header in [
+            r#"{"p2c":-1}"#,
+            r#"{"p2c":999}"#,
+            r#"{"p2c":2500000}"#,
+            r#"{"p2c":4294968296}"#,
+        ] {
+            assert!(matches!(
+                read_count(header),
+                Err(JoseError::InvalidAlgorithm(_))
+            ));
+        }
+        for header in [r#"{"p2c":null}"#, r#"{"p2c":"1000"}"#, r#"{"p2c":1000.0}"#] {
+            assert!(matches!(
+                read_count(header),
+                Err(JoseError::InvalidHeader(_))
+            ));
+        }
+    }
 
     /// RFC 7518 (JWA) Appendix C ECDH-ES known-answer test. The receiver and
     /// ephemeral keys, apu, apv, and the expected derived CEK are all from the

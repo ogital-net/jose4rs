@@ -4,7 +4,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::JoseError;
-use crate::jwt::{JwtClaims, TimeClaim};
+use crate::jwt::{AudienceInfo, JwtClaims, TimeClaim};
 
 /// Stable, typed identifier for a JWT validation failure.
 ///
@@ -583,7 +583,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     #[must_use]
     pub fn set_evaluation_time_from_seconds(mut self, seconds: i64) -> Self {
         self.evaluation_time = Some(if seconds >= 0 {
-            UNIX_EPOCH + Duration::from_secs(seconds as u64)
+            UNIX_EPOCH + Duration::from_secs(seconds.cast_unsigned())
         } else {
             // Negative values are pre-epoch; magnitude fits u64 for any i64::MIN
             // via unsigned_abs.
@@ -678,6 +678,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     ///
     /// [`ErrorCode`]: crate::jwt::ErrorCode
     /// [`InvalidJwtError`]: crate::jwt::InvalidJwtError
+    #[must_use]
     pub fn register_validator<V>(mut self, validator: V) -> Self
     where
         V: JwtValidator + 'a,
@@ -863,40 +864,33 @@ impl JwtConsumer<'_> {
     }
 
     fn validate_audience(&self, claims: &JwtClaims) -> Option<ErrorCode> {
-        // Read the aud claim exactly once: presence, well-formedness, strict
-        // string form, and the string values all come from a single lookup.
-        let aud = claims.audience_info(self.expected_audiences.as_deref().unwrap_or_default());
+        let expected = self.expected_audiences.as_deref();
+        let aud = claims.audience_info(expected.unwrap_or_default());
+        let matches_expected = match aud {
+            AudienceInfo::Absent => {
+                return self
+                    .flags
+                    .contains(ValidationFlags::REQUIRE_AUDIENCE)
+                    .then_some(ErrorCode::AUDIENCE_MISSING);
+            }
+            AudienceInfo::Malformed => return Some(ErrorCode::AUDIENCE_INVALID),
+            AudienceInfo::String { matches_expected }
+            | AudienceInfo::Array { matches_expected } => matches_expected,
+        };
 
-        // A present-but-malformed aud (non-string member, or not a string/array)
-        // is rejected outright rather than silently filtered (RFC 7519
-        // requires the claim shape to be honoured).
-        if aud.malformed {
+        let Some(expected) = expected else {
+            return Some(ErrorCode::AUDIENCE_MISSING);
+        };
+
+        // Strict mode (RFC 7523 client assertions) requires the raw aud
+        // to be a single string, not an array.
+        if self.flags.contains(ValidationFlags::STRICT_AUDIENCE)
+            && matches!(aud, AudienceInfo::Array { .. })
+        {
             return Some(ErrorCode::AUDIENCE_INVALID);
         }
 
-        let has_aud = aud.present;
-
-        if self.flags.contains(ValidationFlags::REQUIRE_AUDIENCE) && !has_aud {
-            return Some(ErrorCode::AUDIENCE_MISSING);
-        }
-
-        if let Some(expected_audiences) = &self.expected_audiences {
-            if has_aud {
-                // Strict mode (RFC 7523 client assertions) requires the raw aud
-                // to be a single string, not an array.
-                if self.flags.contains(ValidationFlags::STRICT_AUDIENCE) && !aud.is_string {
-                    return Some(ErrorCode::AUDIENCE_INVALID);
-                }
-
-                if !expected_audiences.is_empty() && !aud.matches_expected {
-                    return Some(ErrorCode::AUDIENCE_INVALID);
-                }
-            }
-        } else if has_aud {
-            return Some(ErrorCode::AUDIENCE_MISSING);
-        }
-
-        None
+        (!expected.is_empty() && !matches_expected).then_some(ErrorCode::AUDIENCE_INVALID)
     }
 
     fn validate_subject(&self, claims: &JwtClaims) -> Option<ErrorCode> {
@@ -972,10 +966,10 @@ impl JwtConsumer<'_> {
         // Signed seconds since the epoch; negative for pre-epoch times so the
         // claim comparisons (all in i64) work for any evaluation time.
         let eval_secs = match eval_time.duration_since(UNIX_EPOCH) {
-            Ok(d) => d.as_secs() as i64,
-            Err(e) => -(e.duration().as_secs() as i64),
+            Ok(d) => d.as_secs().cast_signed(),
+            Err(e) => -e.duration().as_secs().cast_signed(),
         };
-        let clock_skew_secs = self.allowed_clock_skew.as_secs() as i64;
+        let clock_skew_secs = self.allowed_clock_skew.as_secs().cast_signed();
 
         // A present-but-non-integer NumericDate (float, string, out-of-range)
         // is malformed, not absent (RFC 7519 Section 2).
@@ -1013,7 +1007,7 @@ impl JwtConsumer<'_> {
 
             // Check if expiration is too far in the future
             if let Some(max_future_validity) = self.max_future_validity {
-                let max_validity_secs = max_future_validity.as_secs() as i64;
+                let max_validity_secs = max_future_validity.as_secs().cast_signed();
                 let too_far = match eval_secs
                     .checked_add(max_validity_secs)
                     .and_then(|m| m.checked_add(clock_skew_secs))

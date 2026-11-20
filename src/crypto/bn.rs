@@ -41,7 +41,7 @@ impl BigNum {
         let buffer = unsafe {
             let mut buffer = Box::<[u8]>::new_uninit_slice(len);
             assert!(
-                1 == BN_bn2bin_padded(buffer.as_mut_ptr() as *mut u8, len, ptr),
+                1 == BN_bn2bin_padded(buffer.as_mut_ptr().cast::<u8>(), len, ptr),
                 "BN_bn2bin_padded() failed"
             );
             Zeroizing::new(buffer.assume_init())
@@ -151,12 +151,12 @@ impl BigNum {
         unsafe {
             let mut buffer = Box::<[u8]>::new_uninit_slice(padded_len * 2);
             assert!(
-                1 == BN_bn2bin_padded(buffer.as_mut_ptr() as *mut u8, padded_len, r),
+                1 == BN_bn2bin_padded(buffer.as_mut_ptr().cast::<u8>(), padded_len, r),
                 "BN_bn2bin_padded() failed"
             );
             assert!(
                 1 == BN_bn2bin_padded(
-                    (buffer.as_mut_ptr() as *mut u8).add(padded_len),
+                    buffer.as_mut_ptr().cast::<u8>().add(padded_len),
                     padded_len,
                     s
                 ),

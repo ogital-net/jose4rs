@@ -14,6 +14,7 @@ impl ConcatKDF {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::cast_possible_truncation)]
     pub(super) fn kdf(
         &self,
         shared_secret: &[u8],
@@ -38,6 +39,7 @@ impl ConcatKDF {
         ))
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn kdf_internal(
         &self,
         shared_secret: &[u8],
@@ -69,6 +71,7 @@ impl ConcatKDF {
         mem::Zeroizing::new(derived_key_material.into_boxed_slice())
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn prepend_len(src: impl AsRef<[u8]>) -> Box<[u8]> {
         let src = src.as_ref();
         if src.is_empty() {
@@ -80,12 +83,12 @@ impl ConcatKDF {
             let mut out = Box::<[u8]>::new_uninit_slice(src_len + 4);
             std::ptr::copy_nonoverlapping(
                 len_bytes.as_ptr(),
-                out.as_mut_ptr() as *mut u8,
+                out.as_mut_ptr().cast::<u8>(),
                 len_bytes.len(),
             );
             std::ptr::copy_nonoverlapping(
                 src.as_ptr(),
-                (out.as_mut_ptr() as *mut u8).add(4),
+                out.as_mut_ptr().cast::<u8>().add(4),
                 src_len,
             );
             out.assume_init()
