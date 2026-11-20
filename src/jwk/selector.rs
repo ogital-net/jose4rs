@@ -23,9 +23,9 @@ enum Presence {
 
 impl Presence {
     /// Whether a key's field value satisfies this criterion.
-    fn meets(&self, expected: &str, actual: Option<&str>) -> bool {
+    fn meets(self, expected: &str, actual: Option<&str>) -> bool {
         match actual {
-            None => *self == Presence::OmittedOkay,
+            None => self == Presence::OmittedOkay,
             Some(actual) => actual == expected,
         }
     }

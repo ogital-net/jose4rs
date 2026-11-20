@@ -181,7 +181,7 @@ impl<'a> JsonWebEncryption<'a> {
 
         let cek = key_mgmt_alg.manage_decrypt(
             management_key,
-            &content_enc_alg,
+            content_enc_alg,
             encrypted_key_ref.get(&self.buffer),
             headers,
         )?;
@@ -324,7 +324,7 @@ impl<'a> JsonWebEncryption<'a> {
         let mut headers = self.header.take().ok_or(JoseError::new("missing header"))?;
         let keys = key_mgmt_alg.manage_encrypt(
             management_key,
-            &content_enc_alg,
+            content_enc_alg,
             &rand_buf[..cek_len],
             &mut headers,
         )?;

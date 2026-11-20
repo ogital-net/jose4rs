@@ -139,7 +139,7 @@ impl Algorithm {
     /// Returns the size of the digest algorithm in bytes.
     /// Equivalent to `EVP_MD_size()` but without the FFI call.
     #[inline]
-    pub(crate) fn output_len(&self) -> usize {
+    pub(crate) fn output_len(self) -> usize {
         match self {
             Algorithm::Sha1 => 160 / 8,
             Algorithm::Sha256 => 256 / 8,

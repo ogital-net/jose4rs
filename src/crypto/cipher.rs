@@ -203,7 +203,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(crate) fn key_len(&self) -> usize {
+    pub(crate) fn key_len(self) -> usize {
         match self {
             Algorithm::Aes128Cbc => 16,
             Algorithm::Aes192Cbc => 24,
@@ -212,7 +212,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(crate) fn iv_len(&self) -> usize {
+    pub(crate) fn iv_len(self) -> usize {
         match self {
             Algorithm::Aes128Cbc => 16,
             Algorithm::Aes192Cbc => 16,
@@ -221,7 +221,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(super) fn block_len(&self) -> usize {
+    pub(super) fn block_len(self) -> usize {
         match self {
             Algorithm::Aes128Cbc => 16,
             Algorithm::Aes192Cbc => 16,
@@ -230,7 +230,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(super) fn encrypt_output_len(&self, plain_len: usize) -> usize {
+    pub(super) fn encrypt_output_len(self, plain_len: usize) -> usize {
         plain_len + self.block_len() - (plain_len % self.block_len())
     }
 }

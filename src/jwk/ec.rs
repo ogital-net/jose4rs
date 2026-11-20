@@ -381,7 +381,7 @@ impl EcJsonWebKey {
             DigestAlgorithm::Sha256 => 64,
             DigestAlgorithm::Sha384 => 96,
             DigestAlgorithm::Sha512 => 132,
-            _ => 0,
+            DigestAlgorithm::Sha1 => return false,
         };
         if signature.len() != expected_len {
             return false;

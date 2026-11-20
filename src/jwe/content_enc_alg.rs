@@ -91,7 +91,7 @@ impl ContentEncryptionAlgorithm {
     }
 
     /// The initialization vector (IV / nonce) length in bytes.
-    pub(super) fn iv_len(&self) -> usize {
+    pub(super) fn iv_len(self) -> usize {
         match self {
             ContentEncryptionAlgorithm::Aes128CbcHmacSha256
             | ContentEncryptionAlgorithm::Aes192CbcHmacSha384
@@ -110,7 +110,7 @@ impl ContentEncryptionAlgorithm {
 
     /// Returns the AEAD algorithm for stream ciphers (GCM, `ChaCha20`), or
     /// `None` for CBC-HMAC (which uses padding and a different API).
-    pub(super) fn aead_algorithm(&self) -> Option<AeadAlgorithm> {
+    pub(super) fn aead_algorithm(self) -> Option<AeadAlgorithm> {
         match self {
             ContentEncryptionAlgorithm::Aes128Gcm => Some(AeadAlgorithm::Aes128Gcm),
             ContentEncryptionAlgorithm::Aes192Gcm => Some(AeadAlgorithm::Aes192Gcm),
@@ -189,7 +189,7 @@ impl ContentEncryptionAlgorithm {
     }
 
     pub(super) fn encrypt(
-        &self,
+        self,
         plaintext: &[u8],
         aad: &[u8],
         content_encryption_key: &[u8],
@@ -256,7 +256,7 @@ impl ContentEncryptionAlgorithm {
     }
 
     pub(super) fn decrypt<'a>(
-        &self,
+        self,
         iv: &[u8],
         ciphertext: &'a mut [u8],
         authentication_tag: &[u8],

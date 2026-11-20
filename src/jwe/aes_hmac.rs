@@ -163,7 +163,7 @@ fn mac<'a>(
 
 impl Algorithm {
     #[inline]
-    fn cipher_algorithm(&self) -> CipherAlgorithm {
+    fn cipher_algorithm(self) -> CipherAlgorithm {
         match self {
             Algorithm::Aes128CbcHmacSha256 => CipherAlgorithm::Aes128Cbc,
             Algorithm::Aes192CbcHmacSha384 => CipherAlgorithm::Aes192Cbc,
@@ -172,7 +172,7 @@ impl Algorithm {
     }
 
     #[inline]
-    fn digest_algorithm(&self) -> DigestAlgorithm {
+    fn digest_algorithm(self) -> DigestAlgorithm {
         match self {
             Algorithm::Aes128CbcHmacSha256 => DigestAlgorithm::Sha256,
             Algorithm::Aes192CbcHmacSha384 => DigestAlgorithm::Sha384,
@@ -181,7 +181,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub fn key_len(&self) -> usize {
+    pub fn key_len(self) -> usize {
         match self {
             Algorithm::Aes128CbcHmacSha256 => 32,
             Algorithm::Aes192CbcHmacSha384 => 48,
@@ -190,7 +190,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub fn tag_length(&self) -> usize {
+    pub fn tag_length(self) -> usize {
         match self {
             Algorithm::Aes128CbcHmacSha256 => 16,
             Algorithm::Aes192CbcHmacSha384 => 24,

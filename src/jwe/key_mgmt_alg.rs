@@ -114,9 +114,9 @@ impl KeyManagementAlgorithm {
     /// pre-generated random bytes of `content_enc_alg.key_len()` length;
     /// algorithms that derive their own CEK (ECDH-ES, dir) ignore it.
     pub(super) fn manage_encrypt(
-        &self,
+        self,
         management_key: &JsonWebKey,
-        content_enc_alg: &ContentEncryptionAlgorithm,
+        content_enc_alg: ContentEncryptionAlgorithm,
         cek: &[u8],
         headers: &mut simd_json::owned::Value,
     ) -> Result<ContentEncryptionKeys, JoseError> {
@@ -205,9 +205,9 @@ impl KeyManagementAlgorithm {
     }
 
     pub(super) fn manage_decrypt(
-        &self,
+        self,
         management_key: &JsonWebKey,
-        content_enc_alg: &ContentEncryptionAlgorithm,
+        content_enc_alg: ContentEncryptionAlgorithm,
         encrypted_key: &[u8],
         headers: &simd_json::owned::Value,
     ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
@@ -549,15 +549,15 @@ impl KeyManagementAlgorithm {
     }
 
     fn validate_key_algorithm(
-        &self,
+        self,
         management_key: &JsonWebKey,
-        content_enc_alg: &ContentEncryptionAlgorithm,
+        content_enc_alg: ContentEncryptionAlgorithm,
     ) -> Result<(), JoseError> {
         let matches = match management_key.jwk_algorithm() {
             None => true,
-            Some(JwkAlgorithm::Jwe(algorithm)) => algorithm == self,
+            Some(JwkAlgorithm::Jwe(algorithm)) => *algorithm == self,
             Some(JwkAlgorithm::ContentEncryption(algorithm)) => {
-                *self == Self::Direct && algorithm == content_enc_alg
+                self == Self::Direct && *algorithm == content_enc_alg
             }
             Some(JwkAlgorithm::Jws(_) | JwkAlgorithm::Custom(_)) => false,
         };
@@ -568,7 +568,7 @@ impl KeyManagementAlgorithm {
         let key_algorithm = management_key
             .algorithm()
             .expect("a failed metadata match requires a JWK algorithm");
-        let required = if *self == Self::Direct {
+        let required = if self == Self::Direct {
             format!("'{}' or '{}'", self.name(), content_enc_alg.name())
         } else {
             format!("'{}'", self.name())
@@ -589,7 +589,7 @@ impl KeyManagementAlgorithm {
     /// Derives the PBES2 key-encryption key per RFC 7518 section 4.8:
     /// PBKDF2 with salt = UTF8(alg) || 0x00 || p2s and the password as the key.
     fn derive_pbes2_key(
-        &self,
+        self,
         management_key: &JsonWebKey,
         headers: &simd_json::owned::Value,
         digest_alg: DigestAlgorithm,
@@ -682,7 +682,7 @@ impl KeyManagementAlgorithm {
     }
 
     fn pbes2_encrypt(
-        &self,
+        self,
         management_key: &JsonWebKey,
         cek: &[u8],
         digest_alg: DigestAlgorithm,
@@ -750,9 +750,9 @@ impl KeyManagementAlgorithm {
     /// (ECDH-ES); otherwise a KEK of `kw_len` bytes is derived and the CEK is
     /// wrapped (ECDH-ES+KW). Sets the `epk` header on success.
     fn ecdh_es_encrypt(
-        &self,
+        self,
         management_key: &JsonWebKey,
-        content_enc_alg: &ContentEncryptionAlgorithm,
+        content_enc_alg: ContentEncryptionAlgorithm,
         cek: &[u8],
         headers: &mut simd_json::owned::Value,
         kw_len: Option<usize>,
@@ -918,7 +918,7 @@ mod tests {
         let cek = KeyManagementAlgorithm::EcdhEs
             .manage_decrypt(
                 &receiver,
-                &ContentEncryptionAlgorithm::Aes128Gcm,
+                ContentEncryptionAlgorithm::Aes128Gcm,
                 &[],
                 &headers,
             )
@@ -951,7 +951,7 @@ mod tests {
         // A non-empty encrypted key must be rejected.
         let result = KeyManagementAlgorithm::EcdhEs.manage_decrypt(
             &receiver,
-            &ContentEncryptionAlgorithm::Aes128Gcm,
+            ContentEncryptionAlgorithm::Aes128Gcm,
             &[1, 2, 3],
             &headers,
         );

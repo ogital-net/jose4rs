@@ -138,7 +138,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(crate) fn key_len(&self) -> usize {
+    pub(crate) fn key_len(self) -> usize {
         match self {
             Algorithm::Aes128Gcm => 16,
             Algorithm::Aes192Gcm => 24,
@@ -149,7 +149,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(crate) fn iv_len(&self) -> usize {
+    pub(crate) fn iv_len(self) -> usize {
         match self {
             Algorithm::Aes128Gcm => 12,
             Algorithm::Aes192Gcm => 12,
@@ -160,7 +160,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub(crate) fn max_tag_len(&self) -> usize {
+    pub(crate) fn max_tag_len(self) -> usize {
         match self {
             Algorithm::Aes128Gcm => 16,
             Algorithm::Aes192Gcm => 16,

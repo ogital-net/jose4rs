@@ -62,7 +62,7 @@ impl TryFrom<&str> for Curve {
 
 impl Curve {
     /// Returns the JOSE curve name (e.g. "P-256").
-    pub(crate) fn jose_name(&self) -> &'static str {
+    pub(crate) fn jose_name(self) -> &'static str {
         match self {
             Curve::P256 => "P-256",
             Curve::P384 => "P-384",
@@ -74,7 +74,7 @@ impl Curve {
 
     /// Returns the byte length of a field element (affine coordinate) for this
     /// curve, used for fixed-width JWK coordinate encoding.
-    pub(crate) fn coordinate_len(&self) -> usize {
+    pub(crate) fn coordinate_len(self) -> usize {
         match self {
             Curve::P256 => 32,
             Curve::P384 => 48,
@@ -262,7 +262,7 @@ impl EcKey {
             digest::Algorithm::Sha256 => 32,
             digest::Algorithm::Sha384 => 48,
             digest::Algorithm::Sha512 => 66,
-            _ => unreachable!(),
+            digest::Algorithm::Sha1 => unreachable!(),
         };
 
         unsafe {
@@ -286,7 +286,7 @@ impl EcKey {
             digest::Algorithm::Sha256 => 64,
             digest::Algorithm::Sha384 => 96,
             digest::Algorithm::Sha512 => 132,
-            _ => return false,
+            digest::Algorithm::Sha1 => return false,
         };
         if signature.len() != expected_len {
             return false;
