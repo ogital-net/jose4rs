@@ -735,7 +735,6 @@ mod jwt_consumer_tests {
         let result = consumer.process_to_claims(&claims);
         assert!(result.is_err());
         let err = result.unwrap_err();
-        use crate::jwt::consumer::ErrorCode;
         assert!(err.has_error_code(ErrorCode::AUDIENCE_INVALID));
 
         // Test issuer invalid
