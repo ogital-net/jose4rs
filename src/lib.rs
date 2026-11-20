@@ -70,7 +70,7 @@
 // they are stylistic preferences or are dominated by FFI noise from the
 // aws-lc / boring wrappers (C `c_int` returns, length casts, raw-pointer
 // conversions), where the casts are intentional and SAFETY-documented.
-#![warn(clippy::pedantic)]
+#![warn(clippy::pedantic, unreachable_pub)]
 #![allow(
     // FFI-driven numeric/pointer casts in `src/crypto`; values are bounded by
     // the underlying C API contracts.
@@ -161,23 +161,23 @@ pub(crate) struct BufferRef {
 }
 
 impl BufferRef {
-    pub fn new(start_idx: usize, end_idx: usize) -> Self {
+    pub(crate) fn new(start_idx: usize, end_idx: usize) -> Self {
         BufferRef { start_idx, end_idx }
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.end_idx == 0 || self.end_idx - self.start_idx == 0
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.end_idx - self.start_idx
     }
 
-    pub fn get<'a>(&self, s: &'a [u8]) -> &'a [u8] {
+    pub(crate) fn get<'a>(&self, s: &'a [u8]) -> &'a [u8] {
         unsafe { s.get_unchecked(self.start_idx..self.end_idx) }
     }
 
-    pub fn get_mut<'a>(&self, s: &'a mut [u8]) -> &'a mut [u8] {
+    pub(crate) fn get_mut<'a>(&self, s: &'a mut [u8]) -> &'a mut [u8] {
         unsafe { s.get_unchecked_mut(self.start_idx..self.end_idx) }
     }
 }

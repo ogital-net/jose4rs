@@ -181,7 +181,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub fn key_len(self) -> usize {
+    pub(super) fn key_len(self) -> usize {
         match self {
             Algorithm::Aes128CbcHmacSha256 => 32,
             Algorithm::Aes192CbcHmacSha384 => 48,
@@ -190,7 +190,7 @@ impl Algorithm {
     }
 
     #[inline]
-    pub fn tag_length(self) -> usize {
+    pub(super) fn tag_length(self) -> usize {
         match self {
             Algorithm::Aes128CbcHmacSha256 => 16,
             Algorithm::Aes192CbcHmacSha384 => 24,

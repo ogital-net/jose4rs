@@ -65,7 +65,7 @@ pub(crate) struct EvpMd {
 }
 
 impl EvpMd {
-    pub fn init(alg: Algorithm) -> Self {
+    pub(crate) fn init(alg: Algorithm) -> Self {
         let mut ctx = EvpMdCtx::init();
         unsafe {
             assert!(
@@ -77,7 +77,7 @@ impl EvpMd {
         Self { ctx }
     }
 
-    pub fn update(&mut self, data: &[u8]) {
+    pub(crate) fn update(&mut self, data: &[u8]) {
         if data.is_empty() {
             return;
         }
@@ -89,7 +89,7 @@ impl EvpMd {
         }
     }
 
-    pub fn finish(&mut self) -> Box<[u8]> {
+    pub(crate) fn finish(&mut self) -> Box<[u8]> {
         unsafe {
             let mut buf = Box::<[u8]>::new_uninit_slice(self.output_len());
             assert!(
@@ -113,7 +113,7 @@ impl EvpMd {
     }
 
     #[inline]
-    pub fn output_len(&self) -> usize {
+    pub(crate) fn output_len(&self) -> usize {
         unsafe { EVP_MD_CTX_size(self.ctx.as_ptr()) }
     }
 }
