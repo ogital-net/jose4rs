@@ -35,9 +35,23 @@ pub struct AlgorithmConstraints<A> {
 /// Implemented by [`AlgorithmIdentifier`] (JWS signature algorithms) and
 /// [`KeyManagementAlgorithm`] (JWE key management algorithms), allowing
 /// [`AlgorithmConstraints`] to be generic over both.
-pub trait Algorithm {}
+/// This trait is sealed; downstream crates cannot implement it.
+///
+/// ```compile_fail,E0277
+/// use jose4rs::jwa::Algorithm;
+///
+/// struct CustomAlgorithm;
+/// impl Algorithm for CustomAlgorithm {}
+/// ```
+pub trait Algorithm: sealed::Sealed {}
 
+mod sealed {
+    pub trait Sealed {}
+}
+
+impl sealed::Sealed for AlgorithmIdentifier {}
 impl Algorithm for AlgorithmIdentifier {}
+impl sealed::Sealed for KeyManagementAlgorithm {}
 impl Algorithm for KeyManagementAlgorithm {}
 
 impl<A> AlgorithmConstraints<A>
