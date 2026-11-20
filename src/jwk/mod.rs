@@ -899,7 +899,7 @@ impl JsonWebKeyGenerator {
     }
 
     /// Select the curve for OKP (RFC 8037) key generation: `X25519` for
-    /// ECDH-ES key management algorithms, `Ed25519` for `EdDSA` signatures.
+    /// ECDH-ES key management algorithms, `Ed25519` for `Ed25519` and legacy `EdDSA` signatures.
     /// Without this, ECDH-ES generation defaults to an EC P-256 key.
     pub fn with_okp_curve(mut self, curve: OkpCurve) -> Self {
         self.okp_curve = Some(curve);
@@ -1076,7 +1076,7 @@ impl JsonWebKeyGenerator {
                         Some(alg.into()),
                     )))
                 }
-                AlgorithmIdentifier::EdDsa => {
+                AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519 => {
                     let key = EvpPkey::generate_ed25519();
                     Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::new(
                         key,

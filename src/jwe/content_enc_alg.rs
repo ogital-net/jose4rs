@@ -6,6 +6,7 @@ use crate::{error::JoseError, jwe::ContentEncryptionParts, jwe::MAX_TAG_LEN};
 
 /// Represents the content encryption algorithm identifiers for JWE.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ContentEncryptionAlgorithm {
     /// `A128CBC-HS256` -- AES-128 in CBC mode with HMAC-SHA-256 (RFC 7518).
     Aes128CbcHmacSha256,

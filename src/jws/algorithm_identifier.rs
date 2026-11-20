@@ -4,6 +4,7 @@ use crate::error::JoseError;
 
 /// Represents the algorithm identifiers for JWS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AlgorithmIdentifier {
     /// none
     None,
@@ -28,8 +29,10 @@ pub enum AlgorithmIdentifier {
     /// ES256K
     #[cfg(not(feature = "boring"))]
     EcdsaUsingSecp256k1CurveAndSha256,
-    /// `EdDSA`
+    /// `EdDSA` (RFC 8037). Legacy identifier; prefer `Ed25519` for new deployments.
     EdDsa,
+    /// `Ed25519` (RFC 9864).
+    Ed25519,
     /// PS256
     RsaPssUsingSha256,
     /// PS384
@@ -65,6 +68,7 @@ impl std::str::FromStr for AlgorithmIdentifier {
             #[cfg(not(feature = "boring"))]
             "ES256K" => Ok(AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256),
             "EdDSA" => Ok(AlgorithmIdentifier::EdDsa),
+            "Ed25519" => Ok(AlgorithmIdentifier::Ed25519),
             "PS256" => Ok(AlgorithmIdentifier::RsaPssUsingSha256),
             "PS384" => Ok(AlgorithmIdentifier::RsaPssUsingSha384),
             "PS512" => Ok(AlgorithmIdentifier::RsaPssUsingSha512),
@@ -98,6 +102,7 @@ impl AlgorithmIdentifier {
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => "ES256K",
             AlgorithmIdentifier::EdDsa => "EdDSA",
+            AlgorithmIdentifier::Ed25519 => "Ed25519",
             AlgorithmIdentifier::RsaPssUsingSha256 => "PS256",
             AlgorithmIdentifier::RsaPssUsingSha384 => "PS384",
             AlgorithmIdentifier::RsaPssUsingSha512 => "PS512",
@@ -129,7 +134,7 @@ impl AlgorithmIdentifier {
             | AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512 => Some("EC"),
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => Some("EC"),
-            AlgorithmIdentifier::EdDsa => Some("OKP"),
+            AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519 => Some("OKP"),
             #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
             AlgorithmIdentifier::MlDsa44
             | AlgorithmIdentifier::MlDsa65
@@ -139,6 +144,7 @@ impl AlgorithmIdentifier {
 
     /// The JWK `crv` (curve) implied by this algorithm, if it pins one down:
     /// ES256 -> `P-256`, ES384 -> `P-384`, ES512 -> `P-521`, ES256K -> `secp256k1`.
+    /// `Ed25519` implies the OKP curve `Ed25519`.
     /// `None` for algorithms that don't determine a single curve (including
     /// `EdDSA`, which admits both Ed25519 and Ed448).
     pub fn ec_curve(&self) -> Option<&'static str> {
@@ -148,6 +154,7 @@ impl AlgorithmIdentifier {
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512 => Some("P-521"),
             #[cfg(not(feature = "boring"))]
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => Some("secp256k1"),
+            AlgorithmIdentifier::Ed25519 => Some("Ed25519"),
             _ => None,
         }
     }

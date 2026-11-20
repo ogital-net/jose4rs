@@ -9,6 +9,7 @@ A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516
 [RFC 7797]: https://tools.ietf.org/html/rfc7797
 [RFC 7638]: https://tools.ietf.org/html/rfc7638
 [RFC 9278]: https://www.rfc-editor.org/rfc/rfc9278
+[RFC 9864]: https://www.rfc-editor.org/rfc/rfc9864
 [RFC 9964]: https://tools.ietf.org/html/rfc9964
 [jose4j]: https://bitbucket.org/b_c/jose4j
 
@@ -20,7 +21,7 @@ This crate contains **no cryptographic primitives of its own**. All cryptography
 
 ## What is implemented
 
-**JWS** — compact and flattened JSON serializations; detached/unencoded payloads (`b64=false`, RFC 7797); all registered signature algorithms:
+**JWS** — compact and flattened JSON serializations; detached/unencoded payloads (`b64=false`, RFC 7797); supported signature algorithms:
 
 | Family | Algorithms |
 |--------|------------|
@@ -28,9 +29,11 @@ This crate contains **no cryptographic primitives of its own**. All cryptography
 | RSA | RS256, RS384, RS512 |
 | RSA-PSS | PS256, PS384, PS512 |
 | ECDSA | ES256, ES384, ES512, ES256K (secp256k1) |
-| EdDSA | Ed25519 |
+| EdDSA | `Ed25519` ([RFC 9864]), `EdDSA` (legacy, Ed25519 keys only) |
 | ML-DSA (optional) | ML-DSA-44, ML-DSA-65, ML-DSA-87 |
 | Unsecured | `none` (blocked by default) |
+
+Prefer `Ed25519` for new deployments. Both identifiers use the same signature operation, but algorithm allowlists and a JWK's `alg` restriction distinguish them.
 
 The general (multi-signature) JSON serialization and unprotected headers are **not** supported.
 
@@ -55,6 +58,7 @@ C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its ext
 - **No panics on attacker-controlled input.** Malformed tokens and keys return `JoseError`; panics are reserved for internal invariants.
 - **No in-tree crypto.** All cryptographic operations go through the selected backend; the public API is identical for both.
 - **Algorithm constraints.** jose4j-style allow/block lists for `alg` and `enc` headers, applied at parse/decrypt/verify time. Weak algorithms (RSA1_5, PBES2, `none`) are blocked unless explicitly permitted.
+- **Extensible algorithm enums.** Downstream matches on `AlgorithmIdentifier`, `KeyManagementAlgorithm`, and `ContentEncryptionAlgorithm` need a wildcard arm so new algorithms can be added without breaking exhaustive matches.
 
 [aws-lc-rs]: https://crates.io/crates/aws-lc-rs
 [BoringSSL]: https://github.com/google/boringssl

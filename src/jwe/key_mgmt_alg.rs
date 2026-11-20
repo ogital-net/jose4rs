@@ -12,6 +12,7 @@ use simd_json::derived::{MutableObject, ValueObjectAccess, ValueObjectAccessAsSc
 
 /// Represents the key management algorithm identifiers for JWE.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KeyManagementAlgorithm {
     /// `RSA1_5` -- RSAES-PKCS1-v1_5 key encryption (RFC 7518). Legacy; prefer OAEP.
     Rsa15,

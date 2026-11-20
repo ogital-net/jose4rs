@@ -177,7 +177,7 @@ impl<'a> JsonWebSignature<'a> {
     /// Verifies the signature of the JWS.
     ///
     /// Validates that the signature matches the protected header and payload using
-    /// the configured key and algorithm. Supports HMAC, RSA, ECDSA, `EdDSA`, and RSA-PSS algorithms.
+    /// the configured key and algorithm. Supports HMAC, RSA, ECDSA, Ed25519, and RSA-PSS algorithms.
     ///
     /// # Returns
     ///
@@ -352,7 +352,7 @@ impl<'a> JsonWebSignature<'a> {
                     key.key_type()
                 ))),
             },
-            AlgorithmIdentifier::EdDsa => match key {
+            AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519 => match key {
                 JsonWebKey::OctetKeyPair(okp) => {
                     Ok(okp.verify(verification_input, signature.get(&self.buffer)))
                 }
@@ -591,7 +591,7 @@ impl<'a> JsonWebSignature<'a> {
                     )));
                 }
             },
-            AlgorithmIdentifier::EdDsa => match key {
+            AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519 => match key {
                 JsonWebKey::OctetKeyPair(okp) => Some(okp.sign(input)?),
                 _ => {
                     return Err(JoseError::InvalidKey(format!(
@@ -1089,7 +1089,9 @@ impl<'a> JsonWebSignature<'a> {
             AlgorithmIdentifier::EcdsaUsingSecp256k1CurveAndSha256 => {
                 need += base64::url_encode_size(64);
             }
-            AlgorithmIdentifier::EdDsa => need += base64::url_encode_size(64),
+            AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519 => {
+                need += base64::url_encode_size(64);
+            }
             AlgorithmIdentifier::RsaUsingSha256
             | AlgorithmIdentifier::RsaUsingSha384
             | AlgorithmIdentifier::RsaUsingSha512
@@ -1204,7 +1206,11 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
             // front with a descriptive error rather than letting it
             // reach the signing/verification primitive, where it
             // would fail to initialize.
-            if alg == AlgorithmIdentifier::EdDsa && okp_key.curve_name() != "Ed25519" {
+            if matches!(
+                alg,
+                AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519
+            ) && okp_key.curve_name() != "Ed25519"
+            {
                 return Err(JoseError::InvalidKey(format!(
                     "key curve '{}' cannot be used with {alg}; an Ed25519 key is required",
                     okp_key.curve_name()
@@ -1743,6 +1749,7 @@ mod tests {
             AlgorithmIdentifier::RsaPssUsingSha384,
             AlgorithmIdentifier::RsaPssUsingSha512,
             AlgorithmIdentifier::EdDsa,
+            AlgorithmIdentifier::Ed25519,
             AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256,
             AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384,
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512,
@@ -1780,6 +1787,7 @@ mod tests {
             AlgorithmIdentifier::RsaPssUsingSha384,
             AlgorithmIdentifier::RsaPssUsingSha512,
             AlgorithmIdentifier::EdDsa,
+            AlgorithmIdentifier::Ed25519,
             AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256,
             AlgorithmIdentifier::EcdsaUsingP384CurveAndSha384,
             AlgorithmIdentifier::EcdsaUsingP521CurveAndSha512,
@@ -1802,6 +1810,44 @@ mod tests {
             let jws =
                 JsonWebSignature::from_flattened_json_serialization(&json_serialization).unwrap();
             assert_eq!(jws.payload(&key).unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn test_ed25519_algorithm_policy_distinguishes_legacy_identifier() {
+        use crate::jwk::OutputControlLevel;
+        use simd_json::{derived::MutableObject as _, prelude::Writable as _};
+
+        let ed25519 = AlgorithmIdentifier::Ed25519;
+        let legacy = AlgorithmIdentifier::EdDsa;
+        for (alg, other) in [(ed25519, legacy), (legacy, ed25519)] {
+            let key = JsonWebKeyGenerator::for_signature(alg).generate().unwrap();
+            let public_json = key.to_json(OutputControlLevel::PublicOnly);
+            let public_key = JsonWebKey::from_json(&public_json).unwrap();
+            assert_eq!(public_key.algorithm(), Some(alg.name()));
+
+            let mut jws = JsonWebSignature::new();
+            jws.set_payload(b"hello");
+            jws.set_algorithm(alg);
+            let compact = jws.compact_serialization(&key).unwrap();
+            let permit_alg = AlgorithmConstraints::new(ConstraintType::Permit, [alg]);
+            let permit_other = AlgorithmConstraints::new(ConstraintType::Permit, [other]);
+            let mut parsed = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+            assert_eq!(parsed.algorithm(), Some(alg.name()));
+            parsed.set_algorithm_constraints(&permit_alg);
+            assert!(parsed.verify_signature(&public_key).unwrap());
+
+            let mut public_json = public_json.into_bytes();
+            let mut jwk = simd_json::to_owned_value(&mut public_json).unwrap();
+            jwk.insert("alg", other.name()).unwrap();
+            let relabeled_key = JsonWebKey::from_json(jwk.encode()).unwrap();
+            assert!(matches!(
+                parsed.verify_signature(&relabeled_key),
+                Err(JoseError::InvalidKey(_))
+            ));
+
+            parsed.set_algorithm_constraints(&permit_other);
+            assert!(parsed.verify_signature(&public_key).is_err());
         }
     }
 

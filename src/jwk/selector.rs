@@ -47,10 +47,11 @@ impl VerificationJwkSelector {
     /// given `kid` and `alg` header values.
     ///
     /// The base filter requires the key type implied by `alg` and an exact
-    /// `kid` match (only when the JWS carries a `kid`). `use`/`alg`/`crv` are
-    /// match-if-present on the JWK. When more than one key survives the base
-    /// filter, the survivors are progressively narrowed by `alg` and then by
-    /// the curve implied by `alg` (for EC/OKP), mirroring jose4j.
+    /// `kid` match (only when the JWS carries a `kid`), and permits omitted
+    /// `use`. For `Ed25519` and `EdDSA`, a JWK's `alg` must match if present.
+    /// For other algorithms, a matching or omitted `alg` is preferred when
+    /// several candidates remain, mirroring jose4j. If the JWS algorithm
+    /// specifies a curve, keys on other curves are always excluded.
     pub fn select_list<'k>(
         &self,
         key_id: Option<&str>,
@@ -66,8 +67,12 @@ impl VerificationJwkSelector {
             .filter(|k| Self::base_filter(k, key_id, alg_id, KeyUse::Signature))
             .collect();
 
-        // Narrow by alg (match-if-present) when ambiguous.
-        if candidates.len() > 1 {
+        if matches!(
+            alg_id,
+            Some(AlgorithmIdentifier::EdDsa | AlgorithmIdentifier::Ed25519)
+        ) {
+            candidates.retain(|key| Presence::OmittedOkay.meets(alg, key.algorithm()));
+        } else if candidates.len() > 1 {
             let narrowed: Vec<&JsonWebKey> = candidates
                 .iter()
                 .copied()
@@ -78,15 +83,7 @@ impl VerificationJwkSelector {
             }
         }
 
-        // Narrow by curve. For EC algorithms the curve is pinned by the alg
-        // (RFC 7518 Section 3.4) and enforced at sign/verify time, so a key on
-        // the wrong curve is unusable regardless of how many candidates there
-        // are -- drop it always, not just when ambiguous. EdDSA admits both
-        // Ed25519 and Ed448, so OKP keys are not narrowed by curve here.
-        if let Some(alg_id) = alg_id
-            && alg_id.key_type() == Some("EC")
-            && let Some(crv) = alg_id.ec_curve()
-        {
+        if let Some(crv) = alg_id.and_then(|alg_id| alg_id.ec_curve()) {
             candidates.retain(|k| k.curve_name() == Some(crv));
         }
 
@@ -331,6 +328,32 @@ mod tests {
         // The matching algorithm still selects it.
         let list = sel.select_list(None, "ES384", keys);
         assert_eq!(list.len(), 1);
+    }
+
+    #[test]
+    fn test_verification_ed25519_selection() {
+        let ed25519 = r#"{"kty":"OKP","crv":"Ed25519","alg":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
+        let legacy = r#"{"kty":"OKP","crv":"Ed25519","alg":"EdDSA","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
+        let untagged =
+            r#"{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#;
+        let x25519 =
+            r#"{"kty":"OKP","crv":"X25519","x":"hSDwCYkwp1R0i33ctD73Wg2_Og0mOBr066SpjqqbTmo"}"#;
+        let selector = VerificationJwkSelector::new();
+        for (alg, matching, mismatched) in
+            [("Ed25519", ed25519, legacy), ("EdDSA", legacy, ed25519)]
+        {
+            let keys = set_with(&[mismatched]);
+            assert!(selector.select(None, alg, keys.keys()).is_none());
+
+            let keys = set_with(&[mismatched, matching, untagged]);
+            let selected = selector.select_list(None, alg, keys.keys());
+            assert_eq!(selected.len(), 2);
+            assert_eq!(selected[0].algorithm(), Some(alg));
+            assert_eq!(selected[1].algorithm(), None);
+        }
+
+        let keys = set_with(&[x25519]);
+        assert!(selector.select(None, "Ed25519", keys.keys()).is_none());
     }
 
     #[test]
