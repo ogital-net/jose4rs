@@ -236,9 +236,6 @@ impl RsaJsonWebKey {
     /// Returns an error if the key is missing its modulus or public exponent,
     /// or the crypto backend rejects the public components.
     pub fn into_public(self) -> Result<Self, JoseError> {
-        // `rsa` is a borrowed view of the consumed key (`ManuallyDrop`), so it
-        // frees nothing when it goes out of scope; `to_owned_bignum` copies
-        // the public components out of it.
         let rsa = self
             .evp_pkey
             .rsa()
@@ -278,7 +275,7 @@ impl RsaJsonWebKey {
         let rsa = self.evp_pkey.rsa().unwrap();
         let n = rsa.n();
         let e = rsa.e();
-        let private_params: [(Option<RsaParam>, &str); 6] = match level {
+        let private_params: [(Option<RsaParam<'_>>, &str); 6] = match level {
             OutputControlLevel::IncludePrivate => [
                 (rsa.d(), "d"),
                 (rsa.p(), "p"),
@@ -292,7 +289,7 @@ impl RsaJsonWebKey {
 
         // Exact size: growing after private params are written would free an
         // unwiped copy.
-        let b64_member_len = |name: &str, v: &Option<RsaParam>| -> usize {
+        let b64_member_len = |name: &str, v: &Option<RsaParam<'_>>| -> usize {
             v.as_ref().map_or(0, |b| {
                 raw_member_len(name, base64::url_encode_size(b.len_bytes()))
             })

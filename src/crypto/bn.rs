@@ -26,7 +26,10 @@ impl BigNum {
     }
 
     /// Creates an owned copy from a const (borrowed) BIGNUM pointer.
-    pub(crate) fn dup(ptr: *const BIGNUM) -> Self {
+    ///
+    /// # Safety
+    /// `ptr` must point to a readable BIGNUM for the duration of this call.
+    pub(super) unsafe fn dup(ptr: *const BIGNUM) -> Self {
         assert!(!ptr.is_null());
         let dup = unsafe { BN_dup(ptr) };
         assert!(!dup.is_null());
@@ -63,19 +66,27 @@ impl BigNum {
 
     /// Encodes a borrowed BIGNUM pointer directly to base64url in a single
     /// allocation, without creating an owning `BigNum` or intermediate buffer.
-    pub(crate) fn ptr_to_b64(ptr: *const BIGNUM) -> Box<[u8]> {
+    ///
+    /// # Safety
+    /// `ptr` must point to a readable BIGNUM for the duration of this call.
+    pub(super) unsafe fn ptr_to_b64(ptr: *const BIGNUM) -> Box<[u8]> {
         assert!(!ptr.is_null());
-        let bytes = Zeroizing::new(Self::bn_to_be_bytes(ptr));
+        let bytes = Zeroizing::new(unsafe { Self::bn_to_be_bytes(ptr) });
         base64::url_encode(&bytes)
     }
 
     /// Returns the byte length of a borrowed BIGNUM pointer without allocating.
-    pub(crate) fn ptr_len_bytes(ptr: *const BIGNUM) -> usize {
+    ///
+    /// # Safety
+    /// `ptr` must point to a readable BIGNUM for the duration of this call.
+    pub(super) unsafe fn ptr_len_bytes(ptr: *const BIGNUM) -> usize {
         assert!(!ptr.is_null());
         unsafe { BN_num_bytes(ptr) as usize }
     }
 
-    fn bn_to_be_bytes(ptr: *const BIGNUM) -> Box<[u8]> {
+    /// # Safety
+    /// `ptr` must point to a readable BIGNUM for the duration of this call.
+    unsafe fn bn_to_be_bytes(ptr: *const BIGNUM) -> Box<[u8]> {
         unsafe {
             let bn_bytes = BN_num_bytes(ptr) as usize;
             let mut buffer = Vec::with_capacity(bn_bytes);
@@ -132,11 +143,14 @@ impl BigNum {
 
     #[cfg(test)]
     pub(super) fn concat_padded(&self, other: &Self, padded_len: usize) -> Box<[u8]> {
-        Self::concat_padded_raw(self.as_ptr(), other.as_ptr(), padded_len)
+        unsafe { Self::concat_padded_raw(self.as_ptr(), other.as_ptr(), padded_len) }
     }
 
     /// Concatenates two borrowed BIGNUM pointers into a fixed-width buffer.
-    pub(super) fn concat_padded_raw(
+    ///
+    /// # Safety
+    /// Both pointers must point to readable BIGNUMs for the duration of this call.
+    pub(super) unsafe fn concat_padded_raw(
         r: *const BIGNUM,
         s: *const BIGNUM,
         padded_len: usize,

@@ -1,19 +1,21 @@
-use std::mem;
+use std::{marker::PhantomData, mem, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING, RSA_free,
-    RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n, RSA_get0_p,
-    RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key, RSA_up_ref,
+    BIGNUM, EVP_PKEY_get0_RSA, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING,
+    RSA_PKCS1_PSS_PADDING, RSA_free, RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e,
+    RSA_get0_iqmp, RSA_get0_n, RSA_get0_p, RSA_get0_q, RSA_new, RSA_set0_crt_params,
+    RSA_set0_factors, RSA_set0_key,
 };
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    BIGNUM, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING, RSA_PKCS1_PSS_PADDING, RSA_free,
-    RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e, RSA_get0_iqmp, RSA_get0_n, RSA_get0_p,
-    RSA_get0_q, RSA_new, RSA_set0_crt_params, RSA_set0_factors, RSA_set0_key, RSA_up_ref,
+    BIGNUM, EVP_PKEY_get0_RSA, RSA, RSA_PKCS1_OAEP_PADDING, RSA_PKCS1_PADDING,
+    RSA_PKCS1_PSS_PADDING, RSA_free, RSA_get0_d, RSA_get0_dmp1, RSA_get0_dmq1, RSA_get0_e,
+    RSA_get0_iqmp, RSA_get0_n, RSA_get0_p, RSA_get0_q, RSA_new, RSA_set0_crt_params,
+    RSA_set0_factors, RSA_set0_key,
 };
 
-use crate::error::JoseError;
+use crate::{crypto::EvpPkey, error::JoseError};
 
 use super::bn::BigNum;
 
@@ -26,16 +28,7 @@ impl Rsa {
         Self(ptr)
     }
 
-    pub(crate) fn from_ptr(ptr: *mut RSA) -> Self {
-        assert!(!ptr.is_null());
-        Self(ptr)
-    }
-
     pub(crate) fn as_mut_ptr(&mut self) -> *mut RSA {
-        self.0
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const RSA {
         self.0
     }
 
@@ -110,69 +103,6 @@ impl Rsa {
         qi.manually_drop();
         Ok(())
     }
-
-    pub(crate) fn is_private(&self) -> bool {
-        unsafe { !RSA_get0_d(self.as_ptr()).is_null() }
-    }
-
-    pub(crate) fn n(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_n(self.as_ptr()) })
-    }
-
-    pub(crate) fn e(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_e(self.as_ptr()) })
-    }
-
-    pub(crate) fn d(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_d(self.as_ptr()) })
-    }
-
-    pub(crate) fn p(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_p(self.as_ptr()) })
-    }
-
-    pub(crate) fn q(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_q(self.as_ptr()) })
-    }
-
-    pub(crate) fn dp(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_dmp1(self.as_ptr()) })
-    }
-
-    pub(crate) fn dq(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_dmq1(self.as_ptr()) })
-    }
-
-    pub(crate) fn qi(&self) -> Option<RsaParam> {
-        RsaParam::new(unsafe { RSA_get0_iqmp(self.as_ptr()) })
-    }
-}
-
-/// A borrowed reference to an RSA BIGNUM parameter, valid for the lifetime of
-/// the `Rsa` it was obtained from. Encodes directly to base64 without an
-/// intermediate owned `BigNum`.
-#[derive(Clone, Copy)]
-pub(crate) struct RsaParam(*const BIGNUM);
-
-impl RsaParam {
-    fn new(ptr: *const BIGNUM) -> Option<Self> {
-        (!ptr.is_null()).then_some(Self(ptr))
-    }
-
-    /// Returns the byte length of the big-endian representation.
-    pub(crate) fn len_bytes(self) -> usize {
-        BigNum::ptr_len_bytes(self.0)
-    }
-
-    /// Encodes to base64url in a single allocation.
-    pub(crate) fn to_b64(self) -> Box<[u8]> {
-        BigNum::ptr_to_b64(self.0)
-    }
-
-    /// Returns an owned copy of the parameter.
-    pub(crate) fn to_owned_bignum(self) -> BigNum {
-        BigNum::dup(self.0)
-    }
 }
 
 unsafe impl Send for Rsa {}
@@ -185,11 +115,93 @@ impl Drop for Rsa {
     }
 }
 
-impl Clone for Rsa {
-    fn clone(&self) -> Self {
-        let ptr = self.0;
-        assert_eq!(1, unsafe { RSA_up_ref(ptr) });
-        Self(ptr)
+pub(crate) struct RsaRef<'a> {
+    ptr: ptr::NonNull<RSA>,
+    _key: PhantomData<&'a EvpPkey>,
+}
+
+impl<'a> RsaRef<'a> {
+    pub(crate) fn from_evp_pkey(key: &'a EvpPkey) -> Option<Self> {
+        let ptr = ptr::NonNull::new(unsafe { EVP_PKEY_get0_RSA(key.as_ptr()) })?;
+        Some(Self {
+            ptr,
+            _key: PhantomData,
+        })
+    }
+
+    pub(crate) fn as_ptr(&self) -> *const RSA {
+        self.ptr.as_ptr()
+    }
+
+    pub(crate) fn is_private(&self) -> bool {
+        unsafe { !RSA_get0_d(self.as_ptr()).is_null() }
+    }
+
+    pub(crate) fn n(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_n(self.as_ptr())) }
+    }
+
+    pub(crate) fn e(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_e(self.as_ptr())) }
+    }
+
+    pub(crate) fn d(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_d(self.as_ptr())) }
+    }
+
+    pub(crate) fn p(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_p(self.as_ptr())) }
+    }
+
+    pub(crate) fn q(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_q(self.as_ptr())) }
+    }
+
+    pub(crate) fn dp(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_dmp1(self.as_ptr())) }
+    }
+
+    pub(crate) fn dq(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_dmq1(self.as_ptr())) }
+    }
+
+    pub(crate) fn qi(&self) -> Option<RsaParam<'_>> {
+        unsafe { RsaParam::new(self, RSA_get0_iqmp(self.as_ptr())) }
+    }
+}
+
+/// A borrowed reference to an RSA BIGNUM parameter, valid for the lifetime of
+/// the `RsaRef` it was obtained from. Encodes directly to base64 without an
+/// intermediate owned `BigNum`.
+#[derive(Clone, Copy)]
+pub(crate) struct RsaParam<'a> {
+    ptr: ptr::NonNull<BIGNUM>,
+    _rsa: PhantomData<&'a RsaRef<'a>>,
+}
+
+impl<'a> RsaParam<'a> {
+    /// # Safety
+    /// `ptr` must be null or point to a BIGNUM owned by `rsa` and readable for `'a`.
+    unsafe fn new(_rsa: &'a RsaRef<'_>, ptr: *const BIGNUM) -> Option<Self> {
+        Some(Self {
+            ptr: ptr::NonNull::new(ptr.cast_mut())?,
+            _rsa: PhantomData,
+        })
+    }
+
+    /// Returns the byte length of the big-endian representation.
+    pub(crate) fn len_bytes(self) -> usize {
+        unsafe { BigNum::ptr_len_bytes(self.ptr.as_ptr()) }
+    }
+
+    /// Encodes to base64url in a single allocation.
+    pub(crate) fn to_b64(self) -> Box<[u8]> {
+        unsafe { BigNum::ptr_to_b64(self.ptr.as_ptr()) }
+    }
+
+    /// Returns an owned copy of the parameter.
+    pub(crate) fn to_owned_bignum(self) -> BigNum {
+        unsafe { BigNum::dup(self.ptr.as_ptr()) }
     }
 }
 
@@ -232,5 +244,26 @@ impl From<RsaPadding> for i32 {
 impl From<&RsaPadding> for i32 {
     fn from(value: &RsaPadding) -> Self {
         value.to_id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_key_has_no_private_parameters() {
+        let mut rsa = Rsa::new();
+        rsa.set_key(
+            BigNum::from(&[0x01, 0x01][..]),
+            BigNum::from(&[3][..]),
+            None,
+        )
+        .unwrap();
+        let key = EvpPkey::from_rsa(rsa);
+        let rsa = key.rsa().unwrap();
+        assert!(rsa.n().is_some() && rsa.e().is_some());
+        assert!(rsa.d().is_none() && rsa.p().is_none() && rsa.q().is_none());
+        assert!(rsa.dp().is_none() && rsa.dq().is_none() && rsa.qi().is_none());
     }
 }

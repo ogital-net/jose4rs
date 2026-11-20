@@ -1,20 +1,19 @@
-use std::{mem::ManuallyDrop, ptr};
+use std::ptr;
 
 #[cfg(all(feature = "aws-lc", feature = "pq-ml-dsa"))]
 use aws_lc_sys::EVP_PKEY_get_private_seed;
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign, EVP_DigestSignInit,
-    EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
-    EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
-    EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA,
-    EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS,
-    EVP_PKEY_X25519, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp,
-    EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
-    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
-    EVP_PKEY_get_raw_private_key, EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY,
-    EVP_PKEY_get0_RSA, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
+    EVP_DigestSign, EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY,
+    EVP_PKEY_CTX, EVP_PKEY_CTX_free, EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id,
+    EVP_PKEY_CTX_set_ec_paramgen_curve_nid, EVP_PKEY_CTX_set_rsa_keygen_bits,
+    EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md, EVP_PKEY_CTX_set_rsa_padding,
+    EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
+    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
+    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
+    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
+    EVP_PKEY_get_raw_public_key, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
     EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
     EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
     PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
@@ -22,24 +21,26 @@ use aws_lc_sys::{
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    EC_GROUP_get_curve_name, EC_KEY_get0_group, EVP_DigestSign, EVP_DigestSignInit,
-    EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY, EVP_PKEY_CTX, EVP_PKEY_CTX_free,
-    EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id, EVP_PKEY_CTX_set_ec_paramgen_curve_nid,
-    EVP_PKEY_CTX_set_rsa_keygen_bits, EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md,
-    EVP_PKEY_CTX_set_rsa_padding, EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA,
-    EVP_PKEY_EC, EVP_PKEY_ED25519, EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS,
-    EVP_PKEY_X25519, EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp,
-    EVP_PKEY_decrypt, EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init,
-    EVP_PKEY_derive_set_peer, EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free,
-    EVP_PKEY_get_raw_private_key, EVP_PKEY_get_raw_public_key, EVP_PKEY_get0_EC_KEY,
-    EVP_PKEY_get0_RSA, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
+    EVP_DigestSign, EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_PKEY,
+    EVP_PKEY_CTX, EVP_PKEY_CTX_free, EVP_PKEY_CTX_new, EVP_PKEY_CTX_new_id,
+    EVP_PKEY_CTX_set_ec_paramgen_curve_nid, EVP_PKEY_CTX_set_rsa_keygen_bits,
+    EVP_PKEY_CTX_set_rsa_mgf1_md, EVP_PKEY_CTX_set_rsa_oaep_md, EVP_PKEY_CTX_set_rsa_padding,
+    EVP_PKEY_CTX_set_rsa_pss_saltlen, EVP_PKEY_DH, EVP_PKEY_DSA, EVP_PKEY_EC, EVP_PKEY_ED25519,
+    EVP_PKEY_HKDF, EVP_PKEY_NONE, EVP_PKEY_RSA, EVP_PKEY_RSA_PSS, EVP_PKEY_X25519,
+    EVP_PKEY_assign_EC_KEY, EVP_PKEY_assign_RSA, EVP_PKEY_bits, EVP_PKEY_cmp, EVP_PKEY_decrypt,
+    EVP_PKEY_decrypt_init, EVP_PKEY_derive, EVP_PKEY_derive_init, EVP_PKEY_derive_set_peer,
+    EVP_PKEY_encrypt, EVP_PKEY_encrypt_init, EVP_PKEY_free, EVP_PKEY_get_raw_private_key,
+    EVP_PKEY_get_raw_public_key, EVP_PKEY_id, EVP_PKEY_keygen, EVP_PKEY_keygen_init, EVP_PKEY_new,
     EVP_PKEY_new_raw_private_key, EVP_PKEY_new_raw_public_key, EVP_PKEY_paramgen,
     EVP_PKEY_paramgen_init, EVP_PKEY_up_ref, EVP_marshal_private_key, EVP_marshal_public_key,
     PEM_write_bio_PKCS8PrivateKey, PEM_write_bio_PUBKEY, d2i_AutoPrivateKey, d2i_PUBKEY,
 };
 
 use crate::{
-    crypto::{digest, mem, rsa::RsaPadding},
+    crypto::{
+        digest, mem,
+        rsa::{RsaPadding, RsaRef},
+    },
     error::JoseError,
 };
 
@@ -47,7 +48,7 @@ use super::{
     Bio,
     bytestring::Cbb,
     curve25519::{ed25519_keypair, x25519_keypair},
-    ec::{Curve, EcKey},
+    ec::{Curve, EcKey, EcKeyRef},
     rsa::Rsa,
 };
 
@@ -185,23 +186,14 @@ impl EvpPkey {
         Ok(Self(ptr))
     }
 
-    pub(super) fn from_ptr(ptr: *mut EVP_PKEY) -> Self {
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
-    }
-
-    /// Like [`Self::from_ptr`] but `pub(crate)`, so callers in sibling modules
-    /// outside `crypto` (e.g. `jwk::ml_dsa`) can wrap a raw `EVP_PKEY*` they
-    /// took ownership of via a different path (e.g. handing off an
-    /// `MlDsaKey::into_raw`).
+    /// Takes ownership of one reference to an `EVP_PKEY`.
     ///
     /// # Safety
     ///
-    /// The pointer must be a valid `EVP_PKEY*` with a single owner; this
-    /// `EvpPkey` will free it on drop.
-    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    /// `ptr` must point to a live `EVP_PKEY`. The caller must transfer one
+    /// owned reference, which this wrapper releases on drop.
     pub(crate) unsafe fn from_raw_ptr(ptr: *mut EVP_PKEY) -> Self {
-        Self::from_ptr(ptr)
+        Self(ptr::NonNull::new(ptr).expect("EVP_PKEY pointer must not be null"))
     }
 
     pub(crate) fn from_rsa(mut rsa: Rsa) -> Self {
@@ -210,6 +202,7 @@ impl EvpPkey {
             1 == unsafe { EVP_PKEY_assign_RSA(pkey.as_mut_ptr(), rsa.as_mut_ptr()) },
             "EVP_PKEY_assign_RSA() failed"
         );
+        // EVP_PKEY_assign_RSA() takes ownership of the pointer on success
         rsa.manually_drop();
         pkey
     }
@@ -274,7 +267,7 @@ impl EvpPkey {
         self.0.as_ptr()
     }
 
-    fn as_ptr(&self) -> *const EVP_PKEY {
+    pub(crate) fn as_ptr(&self) -> *const EVP_PKEY {
         self.0.as_ptr()
     }
 
@@ -514,7 +507,7 @@ impl EvpPkey {
                 ));
             }
             // SAFETY: EVP_PKEY_derive_set_peer only reads the key and bumps the refcount
-            if 1 != EVP_PKEY_derive_set_peer(pctx.as_mut_ptr(), peer.as_ptr() as *mut EVP_PKEY) {
+            if 1 != EVP_PKEY_derive_set_peer(pctx.as_mut_ptr(), peer.as_ptr().cast_mut()) {
                 return Err(JoseError::InvalidKey(
                     "peer key is not suitable for key agreement (ECDH); it must use the same curve"
                         .into(),
@@ -567,7 +560,7 @@ impl EvpPkey {
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid private key DER".into()));
         }
-        Ok(Self::from_ptr(pkey))
+        Ok(unsafe { Self::from_raw_ptr(pkey) })
     }
 
     /// Parses a public key from SPKI DER.
@@ -583,7 +576,7 @@ impl EvpPkey {
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid public key DER".into()));
         }
-        Ok(Self::from_ptr(pkey))
+        Ok(unsafe { Self::from_raw_ptr(pkey) })
     }
 
     pub(crate) fn private_key_to_pem(&self) -> Result<Box<str>, JoseError> {
@@ -609,7 +602,7 @@ impl EvpPkey {
         let mut bio = Bio::new();
         if 1 != unsafe {
             // SAFETY: PEM_write_bio_PUBKEY only reads the key; C API lacks const qualifier
-            PEM_write_bio_PUBKEY(bio.as_mut_ptr(), self.as_ptr() as *const _ as *mut EVP_PKEY)
+            PEM_write_bio_PUBKEY(bio.as_mut_ptr(), self.as_ptr().cast_mut())
         } {
             return Err(JoseError::InvalidKey("unsupported key type".into()));
         }
@@ -617,22 +610,12 @@ impl EvpPkey {
         unsafe { Ok(Box::from(std::str::from_utf8_unchecked(bio.as_slice()))) }
     }
 
-    pub(crate) fn rsa(&self) -> Option<ManuallyDrop<Rsa>> {
-        // EVP_PKEY_get0_RSA() does not increment the reference count and the pointer must not be freed
-        let ptr = unsafe { EVP_PKEY_get0_RSA(self.as_ptr()) };
-        if ptr.is_null() {
-            return None;
-        }
-        Some(Rsa::from_ptr(ptr).manually_drop())
+    pub(crate) fn rsa(&self) -> Option<RsaRef<'_>> {
+        RsaRef::from_evp_pkey(self)
     }
 
-    pub(crate) fn ec(&self) -> Option<ManuallyDrop<EcKey>> {
-        // EVP_PKEY_get0_EC_KEY() does not increment the reference count and the pointer must not be freed
-        let ptr = unsafe { EVP_PKEY_get0_EC_KEY(self.as_ptr()) };
-        if ptr.is_null() {
-            return None;
-        }
-        Some(EcKey::from_ptr(ptr).manually_drop())
+    pub(crate) fn ec(&self) -> Option<EcKeyRef<'_>> {
+        EcKeyRef::from_evp_pkey(self)
     }
 
     pub(crate) fn get_raw_private_key(&self) -> Option<Box<[u8]>> {
@@ -837,15 +820,7 @@ impl EvpPkey {
     }
 
     pub(crate) fn get_ec_curve(&self) -> Option<Curve> {
-        let ec_ptr = unsafe { EVP_PKEY_get0_EC_KEY(self.as_ptr()) };
-        if ec_ptr.is_null() {
-            return None;
-        }
-        let nid = unsafe {
-            let grp_ptr = EC_KEY_get0_group(ec_ptr);
-            EC_GROUP_get_curve_name(grp_ptr)
-        };
-        Some(Curve::from_nid(nid))
+        self.ec()?.curve()
     }
 }
 
@@ -914,8 +889,8 @@ impl EvpPkeyCtx {
                 1 == EVP_PKEY_paramgen(self.as_mut_ptr(), &raw mut evp_pkey_ptr),
                 "EVP_PKEY_paramgen() failed"
             );
+            EvpPkey::from_raw_ptr(evp_pkey_ptr)
         }
-        EvpPkey::from_ptr(evp_pkey_ptr)
     }
 
     fn keygen_init(&mut self) {
@@ -936,8 +911,8 @@ impl EvpPkeyCtx {
                 1 == EVP_PKEY_keygen(self.as_mut_ptr(), &raw mut evp_pkey_ptr),
                 "EVP_PKEY_keygen() failed"
             );
+            EvpPkey::from_raw_ptr(evp_pkey_ptr)
         }
-        EvpPkey::from_ptr(evp_pkey_ptr)
     }
 }
 
@@ -963,7 +938,7 @@ mod tests {
     #[test]
     fn test_rsa_pss_signing_uses_digest_length_salt() {
         let key = EvpPkey::generate_rsa(2048);
-        let mut rsa = key.rsa().unwrap();
+        let rsa = key.rsa().unwrap();
         let message = b"JOSE RSA-PSS salt length";
 
         for algorithm in [
@@ -976,7 +951,7 @@ mod tests {
             let hash = digest::digest_buf(algorithm, message, &mut hash_buf);
             let verified = unsafe {
                 RSA_verify_pss_mgf1(
-                    rsa.as_mut_ptr(),
+                    rsa.as_ptr().cast_mut(),
                     hash.as_ptr(),
                     hash.len(),
                     algorithm.as_ptr(),
@@ -993,7 +968,7 @@ mod tests {
     #[test]
     fn test_rsa_pss_verification_requires_digest_length_salt() {
         let key = EvpPkey::generate_rsa(2048);
-        let mut rsa = key.rsa().unwrap();
+        let rsa = key.rsa().unwrap();
         let message = b"JOSE RSA-PSS salt length";
 
         for algorithm in [
@@ -1008,7 +983,7 @@ mod tests {
                 let mut signature_len = signature.len();
                 let signed = unsafe {
                     RSA_sign_pss_mgf1(
-                        rsa.as_mut_ptr(),
+                        rsa.as_ptr().cast_mut(),
                         &raw mut signature_len,
                         signature.as_mut_ptr(),
                         signature.len(),

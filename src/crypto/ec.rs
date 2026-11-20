@@ -1,28 +1,29 @@
-use std::{mem, ptr};
+use std::{marker::PhantomData, mem, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
-    EC_GROUP, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group, EC_KEY_get0_private_key,
-    EC_KEY_get0_public_key, EC_KEY_new_by_curve_name, EC_KEY_set_private_key,
-    EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT, EC_POINT_free, EC_POINT_get_affine_coordinates,
-    EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free, ECDSA_SIG_get0_r,
-    ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign, ECDSA_do_verify,
-    NID_X9_62_prime256v1, NID_secp256k1, NID_secp384r1, NID_secp521r1,
+    EC_GROUP, EC_GROUP_get_curve_name, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group,
+    EC_KEY_get0_private_key, EC_KEY_get0_public_key, EC_KEY_new_by_curve_name,
+    EC_KEY_set_private_key, EC_KEY_set_public_key, EC_POINT, EC_POINT_free,
+    EC_POINT_get_affine_coordinates, EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free,
+    ECDSA_SIG_get0_r, ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign,
+    ECDSA_do_verify, EVP_PKEY_get0_EC_KEY, NID_X9_62_prime256v1, NID_secp256k1, NID_secp384r1,
+    NID_secp521r1,
 };
 
 #[cfg(all(feature = "boring", not(feature = "aws-lc")))]
 use boring_sys::{
-    EC_GROUP, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group, EC_KEY_get0_private_key,
-    EC_KEY_get0_public_key, EC_KEY_new_by_curve_name, EC_KEY_set_private_key,
-    EC_KEY_set_public_key, EC_KEY_up_ref, EC_POINT, EC_POINT_free, EC_POINT_get_affine_coordinates,
-    EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free, ECDSA_SIG_get0_r,
-    ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign, ECDSA_do_verify,
-    NID_X9_62_prime256v1, NID_secp384r1, NID_secp521r1,
+    EC_GROUP, EC_GROUP_get_curve_name, EC_KEY, EC_KEY_check_key, EC_KEY_free, EC_KEY_get0_group,
+    EC_KEY_get0_private_key, EC_KEY_get0_public_key, EC_KEY_new_by_curve_name,
+    EC_KEY_set_private_key, EC_KEY_set_public_key, EC_POINT, EC_POINT_free,
+    EC_POINT_get_affine_coordinates, EC_POINT_new, EC_POINT_set_affine_coordinates, ECDSA_SIG_free,
+    ECDSA_SIG_get0_r, ECDSA_SIG_get0_s, ECDSA_SIG_new, ECDSA_SIG_set0, ECDSA_do_sign,
+    ECDSA_do_verify, EVP_PKEY_get0_EC_KEY, NID_X9_62_prime256v1, NID_secp384r1, NID_secp521r1,
 };
 
 use crate::error::JoseError;
 
-use super::{BigNum, digest};
+use super::{BigNum, EvpPkey, digest};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Curve {
@@ -97,27 +98,21 @@ impl Curve {
     }
 }
 
-pub(crate) struct EcGroup(ptr::NonNull<EC_GROUP>);
+struct EcGroup<'a> {
+    ptr: ptr::NonNull<EC_GROUP>,
+    _key: PhantomData<&'a EcKeyRef<'a>>,
+}
 
-impl EcGroup {
-    pub(super) fn from_ptr(ptr: *mut EC_GROUP) -> Self {
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
-    }
-
+impl EcGroup<'_> {
     fn as_ptr(&self) -> *const EC_GROUP {
-        self.0.as_ptr()
-    }
-
-    pub(super) fn manually_drop(self) -> mem::ManuallyDrop<Self> {
-        mem::ManuallyDrop::new(self)
+        self.ptr.as_ptr()
     }
 }
 
 struct EcPoint(*mut EC_POINT);
 
 impl EcPoint {
-    fn new_pub(group: &EcGroup, mut x: BigNum, mut y: BigNum) -> Result<Self, JoseError> {
+    fn new_pub(group: &EcGroup<'_>, mut x: BigNum, mut y: BigNum) -> Result<Self, JoseError> {
         let ptr = unsafe { EC_POINT_new(group.as_ptr()) };
         assert!(!ptr.is_null());
 
@@ -159,16 +154,7 @@ impl EcKey {
         unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
     }
 
-    pub(super) fn from_ptr(ptr: *mut EC_KEY) -> Self {
-        assert!(!ptr.is_null());
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
-    }
-
     pub(crate) fn as_mut_ptr(&mut self) -> *mut EC_KEY {
-        self.0.as_ptr()
-    }
-
-    pub(crate) fn as_ptr(&self) -> *const EC_KEY {
         self.0.as_ptr()
     }
 
@@ -176,15 +162,16 @@ impl EcKey {
         mem::ManuallyDrop::new(self)
     }
 
-    fn get_group(&self) -> mem::ManuallyDrop<EcGroup> {
-        let ptr = unsafe { EC_KEY_get0_group(self.as_ptr()) };
-        assert!(!ptr.is_null());
-        EcGroup::from_ptr(ptr as *const _ as *mut EC_GROUP).manually_drop()
+    fn as_ref(&self) -> EcKeyRef<'_> {
+        EcKeyRef {
+            ptr: self.0,
+            _key: PhantomData,
+        }
     }
 
     pub(crate) fn set_pub_key(&mut self, x: BigNum, y: BigNum) -> Result<(), JoseError> {
-        let group = self.get_group();
-        let point = EcPoint::new_pub(&group, x, y)?;
+        let key = self.as_ref();
+        let point = EcPoint::new_pub(&key.get_group().expect("EC key has no group"), x, y)?;
         // EC_KEY_set_public_key() rejects the point at infinity and points on a
         // different curve group; off-curve points were already rejected above.
         let res = unsafe { EC_KEY_set_public_key(self.as_mut_ptr(), point.as_ptr()) };
@@ -205,12 +192,54 @@ impl EcKey {
     }
 
     pub(crate) fn check_key(&self) -> Result<(), JoseError> {
-        let res = unsafe { EC_KEY_check_key(self.as_ptr()) };
+        let res = unsafe { EC_KEY_check_key(self.0.as_ptr()) };
         if res == 1 {
             Ok(())
         } else {
             Err(JoseError::InvalidKey("invalid EC key".into()))
         }
+    }
+}
+
+unsafe impl Send for EcKey {}
+unsafe impl Sync for EcKey {}
+
+impl Drop for EcKey {
+    fn drop(&mut self) {
+        unsafe { EC_KEY_free(self.as_mut_ptr()) }
+    }
+}
+
+pub(crate) struct EcKeyRef<'a> {
+    ptr: ptr::NonNull<EC_KEY>,
+    _key: PhantomData<&'a EC_KEY>,
+}
+
+impl<'a> EcKeyRef<'a> {
+    pub(super) fn from_evp_pkey(key: &'a EvpPkey) -> Option<Self> {
+        Some(Self {
+            ptr: ptr::NonNull::new(unsafe { EVP_PKEY_get0_EC_KEY(key.as_ptr()) })?,
+            _key: PhantomData,
+        })
+    }
+
+    fn as_ptr(&self) -> *const EC_KEY {
+        self.ptr.as_ptr()
+    }
+
+    fn get_group(&self) -> Option<EcGroup<'_>> {
+        let group = unsafe { EC_KEY_get0_group(self.as_ptr()) };
+        Some(EcGroup {
+            ptr: ptr::NonNull::new(group.cast_mut())?,
+            _key: PhantomData,
+        })
+    }
+
+    pub(super) fn curve(&self) -> Option<Curve> {
+        let group = self.get_group()?;
+        Some(Curve::from_nid(unsafe {
+            EC_GROUP_get_curve_name(group.as_ptr())
+        }))
     }
 
     pub(crate) fn is_private(&self) -> bool {
@@ -219,7 +248,7 @@ impl EcKey {
 
     /// Returns the affine coordinates (x, y) of the public key point.
     pub(crate) fn pub_key_affine(&self) -> (BigNum, BigNum) {
-        let group = self.get_group();
+        let group = self.get_group().expect("EC key has no group");
         let point = unsafe { EC_KEY_get0_public_key(self.as_ptr()) };
         assert!(!point.is_null());
 
@@ -246,7 +275,7 @@ impl EcKey {
         if d.is_null() {
             None
         } else {
-            Some(BigNum::dup(d))
+            Some(unsafe { BigNum::dup(d) })
         }
     }
 
@@ -317,26 +346,21 @@ impl EcKey {
     }
 }
 
-unsafe impl Send for EcKey {}
-unsafe impl Sync for EcKey {}
-
-impl Drop for EcKey {
-    fn drop(&mut self) {
-        unsafe { EC_KEY_free(self.as_mut_ptr()) }
-    }
-}
-
-impl Clone for EcKey {
-    fn clone(&self) -> Self {
-        let ptr = self.0.as_ptr();
-        assert_eq!(1, unsafe { EC_KEY_up_ref(ptr) });
-        unsafe { Self(ptr::NonNull::new_unchecked(ptr)) }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evp_key_exposes_ec_view_only_for_ec_keys() {
+        let key = EvpPkey::generate_ec(Curve::P256);
+        {
+            let ec = key.ec().unwrap();
+            assert!(ec.is_private());
+            assert_eq!(ec.curve(), Some(Curve::P256));
+        }
+        assert!(key.ec().unwrap().priv_key().is_some());
+        assert!(EvpPkey::generate_x25519().ec().is_none());
+    }
 
     #[test]
     fn test_ec_key_manually_drop() {

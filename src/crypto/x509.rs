@@ -32,14 +32,13 @@ impl X509Cert {
 
     /// Parses a PEM-encoded X.509 certificate.
     pub(crate) fn from_pem(pem: &[u8]) -> Result<Self, JoseError> {
-        // SAFETY: pem is borrowed for the duration of the Bio's use below
-        unsafe { Bio::from_slice(pem) }
+        Bio::from_slice(pem)
             .read_pem_x509()
             .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate PEM".into()))
     }
 
     /// Parses from a BIO. Shared by `from_pem` and `Bio::read_pem_x509`.
-    pub(super) fn from_pem_bio(bio: &mut Bio) -> Option<Self> {
+    pub(super) fn from_pem_bio(bio: &mut Bio<'_>) -> Option<Self> {
         let x509 =
             unsafe { PEM_read_bio_X509(bio.as_mut_ptr(), ptr::null_mut(), None, ptr::null_mut()) };
         if x509.is_null() {
@@ -60,7 +59,7 @@ impl X509Cert {
                 "certificate has no usable public key".into(),
             ));
         }
-        Ok(EvpPkey::from_ptr(pkey))
+        Ok(unsafe { EvpPkey::from_raw_ptr(pkey) })
     }
 
     /// Returns the DER encoding of the certificate.

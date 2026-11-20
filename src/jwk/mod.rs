@@ -7,7 +7,7 @@ use rsa::RsaJsonWebKey;
 use simd_json::derived::ValueObjectAccessAsScalar as _;
 
 use crate::{
-    crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, mem::Zeroizing, rand::rand_bytes},
+    crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, RsaRef, mem::Zeroizing, rand::rand_bytes},
     error::JoseError,
     jwe::{ContentEncryptionAlgorithm, KeyManagementAlgorithm},
     jws::AlgorithmIdentifier,
@@ -413,10 +413,9 @@ impl JsonWebKey {
     /// Returns an error if the PEM is malformed or the key type is unsupported.
     pub fn from_pem(pem: impl AsRef<str>) -> Result<Self, JoseError> {
         let bytes = pem.as_ref().as_bytes();
-        // SAFETY: bytes is borrowed for the duration of each Bio's use below
-        let evp_pkey = match unsafe { Bio::from_slice(bytes) }.read_pem_private_key() {
+        let evp_pkey = match Bio::from_slice(bytes).read_pem_private_key() {
             Some(k) => k,
-            None => match unsafe { Bio::from_slice(bytes) }.read_pem_public_key() {
+            None => match Bio::from_slice(bytes).read_pem_public_key() {
                 Some(k) => k,
                 None => return Err(JoseError::InvalidKey("key not found".into())),
             },
@@ -667,8 +666,8 @@ impl JsonWebKey {
             JsonWebKey::Rsa(rsa) => {
                 let key = rsa.evp_pkey().rsa();
                 let (Some(n), Some(e)) = (
-                    key.as_ref().and_then(|k| k.n()),
-                    key.as_ref().and_then(|k| k.e()),
+                    key.as_ref().and_then(RsaRef::n),
+                    key.as_ref().and_then(RsaRef::e),
                 ) else {
                     return Err(JoseError::InvalidKey(
                         "RSA key has no modulus or exponent".into(),

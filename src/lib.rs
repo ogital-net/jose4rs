@@ -79,7 +79,6 @@
     clippy::cast_sign_loss,
     clippy::cast_precision_loss,
     clippy::ptr_as_ptr,
-    clippy::ptr_cast_constness,
     clippy::ref_as_ptr,
     // Stylistic preferences we don't enforce.
     clippy::must_use_candidate,

@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, ptr};
+use std::{marker::PhantomData, mem::MaybeUninit, ptr};
 
 #[cfg(feature = "aws-lc")]
 use aws_lc_sys::{
@@ -14,25 +14,26 @@ use boring_sys::{
 
 use super::{EvpPkey, X509Cert};
 
-pub(crate) struct Bio(ptr::NonNull<BIO>);
+pub(crate) struct Bio<'a>(ptr::NonNull<BIO>, PhantomData<&'a [u8]>);
 
-impl Bio {
+impl Bio<'static> {
     pub(crate) fn new() -> Self {
         unsafe {
             let ptr = BIO_new(BIO_s_mem());
             assert!(!ptr.is_null(), "BIO_new() failed");
-            Self(ptr::NonNull::new_unchecked(ptr))
+            Self(ptr::NonNull::new_unchecked(ptr), PhantomData)
         }
     }
+}
 
-    /// # Safety
-    /// The slice must outlive the returned `Bio` (the BIO references it without copying).
-    pub(crate) unsafe fn from_slice(slice: &[u8]) -> Self {
-        // Edition 2024: unsafe operations inside an `unsafe fn` body must be
-        // wrapped in an explicit `unsafe { ... }` block.
-        let ptr = unsafe { BIO_new_mem_buf(slice.as_ptr() as *const _, slice.len() as isize) };
-        assert!(!ptr.is_null(), "BIO_new_mem_buf() failed");
-        Self(unsafe { ptr::NonNull::new_unchecked(ptr) })
+impl<'a> Bio<'a> {
+    /// Creates a read-only BIO that borrows the slice without copying it.
+    pub(crate) fn from_slice(slice: &'a [u8]) -> Self {
+        let ptr = unsafe { BIO_new_mem_buf(slice.as_ptr().cast(), slice.len() as isize) };
+        Self(
+            ptr::NonNull::new(ptr).expect("BIO_new_mem_buf() failed"),
+            PhantomData,
+        )
     }
 
     pub(crate) fn as_ptr(&self) -> *const BIO {
@@ -71,7 +72,7 @@ impl Bio {
         if ptr.is_null() {
             None
         } else {
-            Some(EvpPkey::from_ptr(ptr))
+            Some(unsafe { EvpPkey::from_raw_ptr(ptr) })
         }
     }
 
@@ -87,7 +88,7 @@ impl Bio {
         if ptr.is_null() {
             None
         } else {
-            Some(EvpPkey::from_ptr(ptr))
+            Some(unsafe { EvpPkey::from_raw_ptr(ptr) })
         }
     }
 
@@ -96,7 +97,7 @@ impl Bio {
     }
 }
 
-impl Drop for Bio {
+impl Drop for Bio<'_> {
     fn drop(&mut self) {
         unsafe {
             BIO_free_all(self.as_mut_ptr());

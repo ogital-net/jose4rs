@@ -30,5 +30,5 @@ pub(crate) use ec::EcKey;
 pub(crate) use evp::{EvpPkey, EvpPkeyType};
 #[cfg(feature = "pq-ml-dsa")]
 pub(crate) use ml_dsa::MlDsaKey;
-pub(crate) use rsa::{Rsa, RsaPadding, RsaParam};
+pub(crate) use rsa::{Rsa, RsaPadding, RsaParam, RsaRef};
 pub(crate) use x509::X509Cert;
