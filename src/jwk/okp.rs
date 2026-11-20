@@ -119,6 +119,7 @@ impl OkpJsonWebKey {
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
     }
@@ -129,6 +130,7 @@ impl OkpJsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<super::KeyUse> {
         self.key_use
     }
@@ -144,11 +146,13 @@ impl OkpJsonWebKey {
     }
 
     /// The typed algorithm metadata designated for this key, if set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         self.alg.as_ref()
     }
 
     /// The OKP curve.
+    #[must_use]
     pub fn curve(&self) -> OkpCurve {
         match self.evp_pkey.key_type() {
             EvpPkeyType::Ed25519 => OkpCurve::Ed25519,
@@ -163,6 +167,7 @@ impl OkpJsonWebKey {
     ///
     /// Panics if the underlying key is not an Ed25519 or X25519 key. This is
     /// only possible if an internal construction invariant is violated.
+    #[must_use]
     pub fn public_key_bytes(&self) -> Box<[u8]> {
         self.evp_pkey
             .get_raw_public_key()
@@ -173,6 +178,7 @@ impl OkpJsonWebKey {
     ///
     /// For Ed25519 this is the private seed; for X25519 it is the private
     /// scalar. Callers are responsible for protecting the returned secret.
+    #[must_use]
     pub fn private_key_bytes(&self) -> Option<Box<[u8]>> {
         self.evp_pkey.get_raw_private_key()
     }
@@ -184,6 +190,7 @@ impl OkpJsonWebKey {
     ///
     /// Panics if the key holds private material that cannot be serialized and
     /// its public key cannot be serialized either (not expected to occur).
+    #[must_use]
     pub fn to_der(&self) -> Box<[u8]> {
         match self.evp_pkey.private_key_to_der() {
             Ok(der) => der,
@@ -292,12 +299,14 @@ impl OkpJsonWebKey {
     /// The X.509 certificate SHA-1 thumbprint (`x5t`), if this key was built
     /// from a certificate via [`from_x509_pem`](Self::from_x509_pem) or
     /// [`from_x509_der`](Self::from_x509_der).
+    #[must_use]
     pub fn x5t(&self) -> Option<&str> {
         self.x5t.as_deref()
     }
 
     /// The X.509 certificate SHA-256 thumbprint (`x5t#S256`), if this key was
     /// built from a certificate.
+    #[must_use]
     pub fn x5t_s256(&self) -> Option<&str> {
         self.x5t_s256.as_deref()
     }
@@ -437,11 +446,13 @@ impl OkpJsonWebKey {
     }
 
     /// The JWK key type: always `"OKP"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         "OKP"
     }
 
     /// The JOSE curve name (`crv`): `Ed25519` or `X25519`.
+    #[must_use]
     pub fn curve_name(&self) -> &'static str {
         self.curve().jose_name()
     }
@@ -456,6 +467,7 @@ impl OkpJsonWebKey {
     }
 
     /// Verifies an `EdDSA` signature over a message.
+    #[must_use]
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> bool {
         self.evp_pkey.verify_eddsa(message, signature)
     }

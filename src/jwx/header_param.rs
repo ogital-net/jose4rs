@@ -49,6 +49,7 @@ pub enum HeaderParameter {
 
 impl HeaderParameter {
     /// Returns the string representation of the header parameter name.
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             HeaderParameter::Algorithm => "alg",

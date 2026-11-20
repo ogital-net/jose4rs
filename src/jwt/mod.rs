@@ -167,6 +167,7 @@ impl JwtClaims {
     /// # use jose4rs::jwt::JwtClaims;
     /// let claims = JwtClaims::new();
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: ClaimsInner::Owned(simd_json::owned::Value::object()),
@@ -224,6 +225,7 @@ impl JwtClaims {
     /// # Returns
     ///
     /// The issuer value if present, `None` otherwise.
+    #[must_use]
     pub fn issuer(&self) -> Option<&str> {
         with_value!(self, |v| v.get_str(ISSUER))
     }
@@ -250,6 +252,7 @@ impl JwtClaims {
     /// # Returns
     ///
     /// The subject value if present, `None` otherwise.
+    #[must_use]
     pub fn subject(&self) -> Option<&str> {
         with_value!(self, |v| v.get_str(SUBJECT))
     }
@@ -276,6 +279,7 @@ impl JwtClaims {
     /// # Returns
     ///
     /// A vector of audience values if present, `None` otherwise.
+    #[must_use]
     pub fn audience(&self) -> Option<Vec<String>> {
         with_value!(self, |v| {
             let aud_value = v.get(AUDIENCE)?;
@@ -317,6 +321,7 @@ impl JwtClaims {
     ///
     /// The expiration time as a `SystemTime` if present and non-negative,
     /// `None` otherwise.
+    #[must_use]
     pub fn expiration_time(&self) -> Option<SystemTime> {
         let timestamp = with_value!(self, |v| v.get_i64(EXPIRATION_TIME))?;
         let secs = u64::try_from(timestamp).ok()?;
@@ -346,6 +351,7 @@ impl JwtClaims {
     ///
     /// The not before time as a `SystemTime` if present and non-negative,
     /// `None` otherwise.
+    #[must_use]
     pub fn not_before(&self) -> Option<SystemTime> {
         let timestamp = with_value!(self, |v| v.get_i64(NOT_BEFORE))?;
         let secs = u64::try_from(timestamp).ok()?;
@@ -375,6 +381,7 @@ impl JwtClaims {
     ///
     /// The issued at time as a `SystemTime` if present and non-negative,
     /// `None` otherwise.
+    #[must_use]
     pub fn issued_at(&self) -> Option<SystemTime> {
         let timestamp = with_value!(self, |v| v.get_i64(ISSUED_AT))?;
         let secs = u64::try_from(timestamp).ok()?;
@@ -403,6 +410,7 @@ impl JwtClaims {
     /// # Returns
     ///
     /// The JWT ID value if present, `None` otherwise.
+    #[must_use]
     pub fn jwt_id(&self) -> Option<&str> {
         with_value!(self, |v| v.get_str(JWT_ID))
     }
@@ -447,6 +455,7 @@ impl JwtClaims {
     /// assert_eq!(claims.string_claim("exp"), None); // not a string
     /// assert_eq!(claims.string_claim("missing"), None);
     /// ```
+    #[must_use]
     pub fn string_claim(&self, name: &str) -> Option<&str> {
         with_value!(self, |v| v.get_str(name))
     }
@@ -506,6 +515,7 @@ impl JwtClaims {
     /// assert_eq!(claims.string_array_claim("exp"), None); // not strings
     /// assert_eq!(claims.string_array_claim("missing"), None);
     /// ```
+    #[must_use]
     pub fn string_array_claim(&self, name: &str) -> Option<Vec<String>> {
         with_value!(self, |v| {
             let val = v.get(name)?;
@@ -569,11 +579,13 @@ impl JwtClaims {
     /// let json = claims.to_json();
     /// assert!(json.contains("example.com"));
     /// ```
+    #[must_use]
     pub fn to_json(&self) -> String {
         with_value!(self, |v| v.encode())
     }
 
     /// Returns `true` if a claim with the given name is present (any type).
+    #[must_use]
     pub fn has_claim(&self, name: &str) -> bool {
         with_value!(self, |v| v.get(name).is_some())
     }

@@ -65,6 +65,7 @@ pub enum JwkAlgorithm {
 
 impl JwkAlgorithm {
     /// Returns the JOSE algorithm name.
+    #[must_use]
     pub fn name(&self) -> &str {
         match self {
             Self::Jws(algorithm) => algorithm.name(),
@@ -132,6 +133,7 @@ pub enum KeyUse {
 
 impl KeyUse {
     /// The JWK `use` value: `sig` or `enc`.
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             KeyUse::Signature => "sig",
@@ -488,6 +490,7 @@ impl JsonWebKey {
     /// Serializes the private key to PKCS#8 DER.
     ///
     /// Returns `None` for symmetric `oct` keys or public-only keys.
+    #[must_use]
     pub fn to_pkcs8_der(&self) -> Option<Box<[u8]>> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.evp_pkey().private_key_to_der().ok(),
@@ -502,6 +505,7 @@ impl JsonWebKey {
     /// Serializes the public key to `SubjectPublicKeyInfo` (SPKI) DER.
     ///
     /// Returns `None` for symmetric `oct` keys.
+    #[must_use]
     pub fn to_spki_der(&self) -> Option<Box<[u8]>> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.evp_pkey().public_key_to_der().ok(),
@@ -517,6 +521,7 @@ impl JsonWebKey {
     /// otherwise SPKI.
     ///
     /// Returns `None` for symmetric `oct` keys.
+    #[must_use]
     pub fn to_der(&self) -> Option<Box<[u8]>> {
         match self {
             JsonWebKey::EllipticCurve(ec) => Some(ec.to_der()),
@@ -580,6 +585,7 @@ impl JsonWebKey {
     }
 
     /// Serializes the key to its JWK JSON form, honoring the given output level.
+    #[must_use]
     pub fn to_json(&self, level: OutputControlLevel) -> String {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.to_json(level),
@@ -593,6 +599,7 @@ impl JsonWebKey {
 
     /// The X.509 certificate SHA-1 thumbprint (`x5t`), if this key was built
     /// from a certificate. Always `None` for symmetric `oct` keys.
+    #[must_use]
     pub fn x5t(&self) -> Option<&str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.x5t(),
@@ -606,6 +613,7 @@ impl JsonWebKey {
 
     /// The X.509 certificate SHA-256 thumbprint (`x5t#S256`), if this key was
     /// built from a certificate. Always `None` for symmetric `oct` keys.
+    #[must_use]
     pub fn x5t_s256(&self) -> Option<&str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.x5t_s256(),
@@ -721,6 +729,7 @@ impl JsonWebKey {
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.key_id(),
@@ -746,6 +755,7 @@ impl JsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<KeyUse> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.key_use(),
@@ -758,6 +768,7 @@ impl JsonWebKey {
     }
 
     /// The algorithm (`alg`) designated for this key, if set.
+    #[must_use]
     pub fn algorithm(&self) -> Option<&str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.alg(),
@@ -770,6 +781,7 @@ impl JsonWebKey {
     }
 
     /// The typed algorithm metadata designated for this key, if set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.jwk_algorithm(),
@@ -783,6 +795,7 @@ impl JsonWebKey {
 
     /// The JOSE curve name (`crv`) for EC and OKP keys, the ML-DSA parameter
     /// set name for AKP keys, and `None` for RSA and oct.
+    #[must_use]
     pub fn curve_name(&self) -> Option<&'static str> {
         match self {
             JsonWebKey::EllipticCurve(ec) => Some(ec.curve_name()),
@@ -794,6 +807,7 @@ impl JsonWebKey {
     }
 
     /// The raw symmetric key bytes for `oct` keys; `None` for asymmetric keys.
+    #[must_use]
     pub fn key_bytes(&self) -> Option<&[u8]> {
         match self {
             JsonWebKey::Oct(oct) => Some(oct.key_bytes()),
@@ -802,6 +816,7 @@ impl JsonWebKey {
     }
 
     /// The JWK key type (`kty`): `"RSA"`, `"EC"`, `"OKP"`, `"AKP"`, or `"oct"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         match self {
             JsonWebKey::EllipticCurve(ec) => ec.key_type(),
@@ -825,6 +840,7 @@ pub enum OkpCurve {
 
 impl OkpCurve {
     /// The JOSE curve name.
+    #[must_use]
     pub fn jose_name(self) -> &'static str {
         match self {
             Self::Ed25519 => "Ed25519",
@@ -870,6 +886,7 @@ impl JsonWebKeyGenerator {
     /// Creates a generator for a key suitable for the given JWE key management
     /// algorithm (`alg`). The generated JWK is restricted to this algorithm in
     /// its `alg` metadata.
+    #[must_use]
     pub fn for_encryption(alg: KeyManagementAlgorithm) -> Self {
         JsonWebKeyGenerator {
             key_mgmt_alg: Some(alg),
@@ -881,6 +898,7 @@ impl JsonWebKeyGenerator {
     /// Creates a generator for a key suitable for the given JWS signature
     /// algorithm (`alg`). The generated JWK is restricted to this algorithm in
     /// its `alg` metadata.
+    #[must_use]
     pub fn for_signature(alg: AlgorithmIdentifier) -> Self {
         JsonWebKeyGenerator {
             key_mgmt_alg: None,
@@ -893,6 +911,7 @@ impl JsonWebKeyGenerator {
     /// Select the key size in bits. Applies to symmetric `oct` keys and EC/
     /// RSA where a non-default size is wanted. If unset, a size appropriate
     /// for the algorithm is used.
+    #[must_use]
     pub fn with_key_bits(mut self, bits: u16) -> Self {
         self.key_bits = Some(bits);
         self
@@ -901,6 +920,7 @@ impl JsonWebKeyGenerator {
     /// Select the curve for OKP (RFC 8037) key generation: `X25519` for
     /// ECDH-ES key management algorithms, `Ed25519` for `Ed25519` and legacy `EdDSA` signatures.
     /// Without this, ECDH-ES generation defaults to an EC P-256 key.
+    #[must_use]
     pub fn with_okp_curve(mut self, curve: OkpCurve) -> Self {
         self.okp_curve = Some(curve);
         self

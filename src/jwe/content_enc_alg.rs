@@ -54,6 +54,7 @@ impl std::str::FromStr for ContentEncryptionAlgorithm {
 
 impl ContentEncryptionAlgorithm {
     /// Returns the string representation of the content encryption algorithm.
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             ContentEncryptionAlgorithm::Aes128CbcHmacSha256 => "A128CBC-HS256",
@@ -68,6 +69,7 @@ impl ContentEncryptionAlgorithm {
     }
 
     /// The content-encryption key (CEK) length in bytes for this algorithm.
+    #[must_use]
     pub fn key_len(&self) -> usize {
         match self {
             ContentEncryptionAlgorithm::Aes128CbcHmacSha256 => {

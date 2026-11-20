@@ -79,7 +79,7 @@ fn bench_jwt_validation(c: &mut Criterion) {
         b.iter(|| {
             black_box(
                 consumer
-                    .process_to_claims(&black_box(&parsed).to_json())
+                    .process_to_claims(black_box(&parsed).to_json())
                     .unwrap(),
             );
         });

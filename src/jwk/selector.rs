@@ -39,6 +39,7 @@ pub struct VerificationJwkSelector;
 
 impl VerificationJwkSelector {
     /// Create a new selector.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -52,6 +53,7 @@ impl VerificationJwkSelector {
     /// For other algorithms, a matching or omitted `alg` is preferred when
     /// several candidates remain, mirroring jose4j. If the JWS algorithm
     /// specifies a curve, keys on other curves are always excluded.
+    #[must_use]
     pub fn select_list<'k>(
         &self,
         key_id: Option<&str>,
@@ -91,6 +93,7 @@ impl VerificationJwkSelector {
     }
 
     /// Returns the single most-preferred key, or `None` if no key matches.
+    #[must_use]
     pub fn select<'k>(
         &self,
         key_id: Option<&str>,
@@ -179,6 +182,7 @@ pub struct DecryptionJwkSelector;
 
 impl DecryptionJwkSelector {
     /// Create a new selector.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -191,6 +195,7 @@ impl DecryptionJwkSelector {
     /// is then taken from `epk` rather than from `alg` (so OKP X25519 keys
     /// match ECDH-ES, whose `alg` alone would imply EC). Pass `None` for
     /// non-ECDH algorithms.
+    #[must_use]
     pub fn select_list<'k>(
         &self,
         key_id: Option<&str>,
@@ -228,6 +233,7 @@ impl DecryptionJwkSelector {
     }
 
     /// Returns the single most-preferred key, or `None` if no key matches.
+    #[must_use]
     pub fn select<'k>(
         &self,
         key_id: Option<&str>,

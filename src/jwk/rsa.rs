@@ -75,6 +75,7 @@ impl RsaJsonWebKey {
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
     }
@@ -85,6 +86,7 @@ impl RsaJsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<super::KeyUse> {
         self.key_use
     }
@@ -95,6 +97,7 @@ impl RsaJsonWebKey {
     }
 
     /// The typed algorithm metadata designated for this key, if set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         self.alg.as_ref()
     }
@@ -106,6 +109,7 @@ impl RsaJsonWebKey {
     ///
     /// Panics if the underlying key is not an RSA key (only possible if it was
     /// constructed from a non-RSA document).
+    #[must_use]
     pub fn to_der(&self) -> Box<[u8]> {
         if self.evp_pkey.rsa().unwrap().is_private() {
             self.evp_pkey.private_key_to_der().unwrap()
@@ -208,12 +212,14 @@ impl RsaJsonWebKey {
     /// The X.509 certificate SHA-1 thumbprint (`x5t`), if this key was built
     /// from a certificate via [`from_x509_pem`](Self::from_x509_pem) or
     /// [`from_x509_der`](Self::from_x509_der).
+    #[must_use]
     pub fn x5t(&self) -> Option<&str> {
         self.x5t.as_deref()
     }
 
     /// The X.509 certificate SHA-256 thumbprint (`x5t#S256`), if this key was
     /// built from a certificate.
+    #[must_use]
     pub fn x5t_s256(&self) -> Option<&str> {
         self.x5t_s256.as_deref()
     }
@@ -269,6 +275,7 @@ impl RsaJsonWebKey {
     ///
     /// Panics if the underlying key is not an RSA key (only possible if it was
     /// constructed from a non-RSA document).
+    #[must_use]
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         use super::OutputControlLevel;
 
@@ -384,31 +391,37 @@ impl RsaJsonWebKey {
     }
 
     /// The JWK key type: always `"RSA"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         "RSA"
     }
 
     /// The modulus size of the key, in bits.
+    #[must_use]
     pub fn key_size_bits(&self) -> usize {
         self.evp_pkey.key_size_bits()
     }
 
     /// Signs a message with RSASSA-PKCS1-v1_5 using the given digest.
+    #[must_use]
     pub fn sign(&self, message: &[u8], digest: DigestAlgorithm) -> Box<[u8]> {
         self.evp_pkey.sign(message, digest)
     }
 
     /// Signs a message with RSASSA-PSS using the given digest.
+    #[must_use]
     pub fn sign_rsa_pss(&self, message: &[u8], digest: DigestAlgorithm) -> Box<[u8]> {
         self.evp_pkey.sign_rsa_pss(message, digest)
     }
 
     /// Verifies an RSASSA-PKCS1-v1_5 signature over a message.
+    #[must_use]
     pub fn verify(&self, message: &[u8], digest: DigestAlgorithm, signature: &[u8]) -> bool {
         self.evp_pkey.verify(message, digest, signature)
     }
 
     /// Verifies an RSASSA-PSS signature over a message.
+    #[must_use]
     pub fn verify_rsa_pss(
         &self,
         message: &[u8],
@@ -419,6 +432,7 @@ impl RsaJsonWebKey {
     }
 
     /// Encrypts with RSAES-PKCS1-v1_5 (JWE `RSA1_5` key management).
+    #[must_use]
     pub fn encrypt_pcks1_1_5(&self, plaintext: &[u8]) -> Box<[u8]> {
         self.evp_pkey
             .rsa_encrypt(RsaPadding::Pkcs1, DigestAlgorithm::Sha1, plaintext)
@@ -434,6 +448,7 @@ impl RsaJsonWebKey {
     }
 
     /// Encrypts with RSAES-OAEP using the given digest (JWE `RSA-OAEP*` key management).
+    #[must_use]
     pub fn encrypt_oaep(&self, plaintext: &[u8], digest_alg: DigestAlgorithm) -> Box<[u8]> {
         self.evp_pkey
             .rsa_encrypt(RsaPadding::Pkcs1Oaep, digest_alg, plaintext)

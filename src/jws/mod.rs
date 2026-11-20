@@ -103,6 +103,7 @@ impl std::fmt::Debug for JsonWebSignature<'_> {
 impl<'a> JsonWebSignature<'a> {
     /// Create an empty JWS. Set a payload and/or compact serialization, then
     /// sign or verify.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
@@ -437,6 +438,7 @@ impl<'a> JsonWebSignature<'a> {
     }
 
     /// Returns the signature algorithm (`alg`) header value, if set.
+    #[must_use]
     pub fn algorithm(&self) -> Option<&str> {
         self.algorithm_header_value()
     }
@@ -762,6 +764,7 @@ impl<'a> JsonWebSignature<'a> {
     /// This is true by default and false for a parsed RFC 7797 `b64=false`
     /// JWS or after calling [`Self::set_b64`] with `false`. JWTs must not use
     /// unencoded payloads.
+    #[must_use]
     pub fn is_payload_base64url_encoded(&self) -> bool {
         self.payload_is_b64
     }

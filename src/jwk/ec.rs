@@ -65,6 +65,7 @@ impl EcJsonWebKey {
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
     }
@@ -75,6 +76,7 @@ impl EcJsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<super::KeyUse> {
         self.key_use
     }
@@ -90,6 +92,7 @@ impl EcJsonWebKey {
     }
 
     /// The typed algorithm metadata designated for this key, if set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         self.alg.as_ref()
     }
@@ -101,6 +104,7 @@ impl EcJsonWebKey {
     ///
     /// Panics if the underlying key is not an EC key (only possible if it was
     /// constructed from a non-EC document).
+    #[must_use]
     pub fn to_der(&self) -> Box<[u8]> {
         if self.evp_pkey.ec().unwrap().is_private() {
             self.evp_pkey.private_key_to_der().unwrap()
@@ -203,12 +207,14 @@ impl EcJsonWebKey {
     /// The X.509 certificate SHA-1 thumbprint (`x5t`), if this key was built
     /// from a certificate via [`from_x509_pem`](Self::from_x509_pem) or
     /// [`from_x509_der`](Self::from_x509_der).
+    #[must_use]
     pub fn x5t(&self) -> Option<&str> {
         self.x5t.as_deref()
     }
 
     /// The X.509 certificate SHA-256 thumbprint (`x5t#S256`), if this key was
     /// built from a certificate.
+    #[must_use]
     pub fn x5t_s256(&self) -> Option<&str> {
         self.x5t_s256.as_deref()
     }
@@ -259,6 +265,7 @@ impl EcJsonWebKey {
     ///
     /// Panics if the underlying key is not an EC key (only possible if it was
     /// constructed from a non-EC document).
+    #[must_use]
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         use super::OutputControlLevel;
 
@@ -354,6 +361,7 @@ impl EcJsonWebKey {
     }
 
     /// The JWK key type: always `"EC"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         "EC"
     }
@@ -365,6 +373,7 @@ impl EcJsonWebKey {
     ///
     /// Panics if the underlying key is not an EC key (only possible if it was
     /// constructed from a non-EC document).
+    #[must_use]
     pub fn sign(&self, message: &[u8], digest_alg: DigestAlgorithm) -> Box<[u8]> {
         let ec = self.evp_pkey.ec().unwrap();
         ec.sign_concatenated(message, digest_alg)
@@ -376,6 +385,7 @@ impl EcJsonWebKey {
     ///
     /// Panics if the underlying key is not an EC key (only possible if it was
     /// constructed from a non-EC document).
+    #[must_use]
     pub fn verify(&self, message: &[u8], digest_alg: DigestAlgorithm, signature: &[u8]) -> bool {
         let expected_len = match digest_alg {
             DigestAlgorithm::Sha256 => 64,
@@ -453,6 +463,7 @@ impl EcJsonWebKey {
     }
 
     /// The JOSE curve name (`crv`): `P-256`, `P-384`, `P-521`, or `secp256k1`.
+    #[must_use]
     pub fn curve_name(&self) -> &'static str {
         self.get_curve().jose_name()
     }

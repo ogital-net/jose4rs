@@ -81,7 +81,6 @@
     clippy::ptr_as_ptr,
     clippy::ref_as_ptr,
     // Stylistic preferences we don't enforce.
-    clippy::must_use_candidate,
     clippy::return_self_not_must_use,
     clippy::similar_names,
     clippy::many_single_char_names,

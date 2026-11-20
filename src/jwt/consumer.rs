@@ -137,6 +137,7 @@ impl ErrorCode {
     /// Panics if `code` is non-negative. Use this only with a literal
     /// negative integer or a `const` you've already validated.
     #[track_caller]
+    #[must_use]
     pub const fn custom(code: i32) -> Self {
         // const fn: simple `assert!` is allowed (no `format!`).
         assert!(
@@ -148,11 +149,13 @@ impl ErrorCode {
 
     /// The raw integer value. Library codes are positive; custom codes
     /// are negative.
+    #[must_use]
     pub const fn code(self) -> i32 {
         self.0
     }
 
     /// `true` if this is a consumer-defined code (negative integer).
+    #[must_use]
     pub const fn is_custom(self) -> bool {
         self.0 < 0
     }
@@ -257,21 +260,25 @@ impl InvalidJwtError {
     }
 
     /// Check if this error contains a specific error code.
+    #[must_use]
     pub fn has_error_code(&self, error_code: ErrorCode) -> bool {
         self.error_codes.contains(&error_code)
     }
 
     /// Check if the JWT has expired.
+    #[must_use]
     pub fn has_expired(&self) -> bool {
         self.has_error_code(ErrorCode::EXPIRED)
     }
 
     /// The human-readable failure message.
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
     /// All error codes carried by this error, in insertion order.
+    #[must_use]
     pub fn error_codes(&self) -> &[ErrorCode] {
         &self.error_codes
     }
@@ -462,6 +469,7 @@ impl fmt::Debug for dyn JwtValidator {
 
 impl<'a> JwtConsumerBuilder<'a> {
     /// Create a new JWT Consumer Builder
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -471,6 +479,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     /// # Arguments
     /// * `require_issuer` - Whether the issuer claim is required
     /// * `issuers` - Expected issuer value(s)
+    #[must_use]
     pub fn set_expected_issuers(mut self, require_issuer: bool, issuers: &[&'a str]) -> Self {
         self.expected_issuers = Some(issuers.to_vec());
         self.flags
@@ -479,6 +488,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Set the expected issuer for the JWT (convenience method)
+    #[must_use]
     pub fn set_expected_issuer(mut self, issuer: &'a str) -> Self {
         self.expected_issuers = Some(vec![issuer]);
         self.flags.set(ValidationFlags::REQUIRE_ISSUER, true);
@@ -491,6 +501,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     /// * `require_audience` - Whether the audience claim is required
     /// * `strict` - If true, audience must be a single string value
     /// * `audiences` - Expected audience value(s)
+    #[must_use]
     pub fn set_expected_audience(
         mut self,
         require_audience: bool,
@@ -505,6 +516,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Skip default audience validation
+    #[must_use]
     pub fn set_skip_default_audience_validation(mut self) -> Self {
         self.flags
             .set(ValidationFlags::SKIP_DEFAULT_AUDIENCE_VALIDATION, true);
@@ -512,6 +524,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Set the expected subject for the JWT
+    #[must_use]
     pub fn set_expected_subject(mut self, subject: &'a str) -> Self {
         self.expected_subject = Some(subject);
         self.flags.set(ValidationFlags::REQUIRE_SUBJECT, true);
@@ -519,30 +532,35 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Require that a subject claim be present
+    #[must_use]
     pub fn set_require_subject(mut self) -> Self {
         self.flags.set(ValidationFlags::REQUIRE_SUBJECT, true);
         self
     }
 
     /// Require that a JWT ID claim be present
+    #[must_use]
     pub fn set_require_jwt_id(mut self) -> Self {
         self.flags.set(ValidationFlags::REQUIRE_JWT_ID, true);
         self
     }
 
     /// Require that an expiration time claim be present
+    #[must_use]
     pub fn set_require_expiration_time(mut self) -> Self {
         self.flags.set(ValidationFlags::REQUIRE_EXPIRATION, true);
         self
     }
 
     /// Require that a not before time claim be present
+    #[must_use]
     pub fn set_require_not_before(mut self) -> Self {
         self.flags.set(ValidationFlags::REQUIRE_NOT_BEFORE, true);
         self
     }
 
     /// Require that an issued at time claim be present
+    #[must_use]
     pub fn set_require_issued_at(mut self) -> Self {
         self.flags.set(ValidationFlags::REQUIRE_ISSUED_AT, true);
         self
@@ -553,6 +571,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     /// Useful to prevent cross-JWT confusion in situations where explicit
     /// typing via the `typ` header is not used -- e.g. rejecting an access
     /// token that carries a claim only ID tokens should have.
+    #[must_use]
     pub fn set_prohibited_claims(mut self, claims: &[&'a str]) -> Self {
         self.prohibited_claims = claims.to_vec();
         self
@@ -561,6 +580,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     /// Set the time to use when validating time-based claims.
     ///
     /// A negative value denotes a pre-epoch time (before 1970-01-01).
+    #[must_use]
     pub fn set_evaluation_time_from_seconds(mut self, seconds: i64) -> Self {
         self.evaluation_time = Some(if seconds >= 0 {
             UNIX_EPOCH + Duration::from_secs(seconds as u64)
@@ -573,18 +593,21 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Set the amount of clock skew to allow for time-based validations
+    #[must_use]
     pub fn set_allowed_clock_skew(mut self, duration: Duration) -> Self {
         self.allowed_clock_skew = duration;
         self
     }
 
     /// Set the maximum on how far in the future the exp claim can be
+    #[must_use]
     pub fn set_max_future_validity(mut self, duration: Duration) -> Self {
         self.max_future_validity = Some(duration);
         self
     }
 
     /// Set restrictions on how far from evaluation time the iat claim can be
+    #[must_use]
     pub fn set_issued_at_restrictions(
         mut self,
         allowed_secs_in_future: i64,
@@ -596,12 +619,14 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Skip all claim validators
+    #[must_use]
     pub fn set_skip_all_validators(mut self) -> Self {
         self.flags.set(ValidationFlags::SKIP_ALL_VALIDATORS, true);
         self
     }
 
     /// Skip all default claim validators (but not custom ones)
+    #[must_use]
     pub fn set_skip_all_default_validators(mut self) -> Self {
         self.flags
             .set(ValidationFlags::SKIP_ALL_DEFAULT_VALIDATORS, true);
@@ -662,6 +687,7 @@ impl<'a> JwtConsumerBuilder<'a> {
     }
 
     /// Build the JWT Consumer
+    #[must_use]
     pub fn build(self) -> JwtConsumer<'a> {
         JwtConsumer {
             expected_issuers: self.expected_issuers,

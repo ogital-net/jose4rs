@@ -87,6 +87,7 @@ impl std::str::FromStr for AlgorithmIdentifier {
 
 impl AlgorithmIdentifier {
     /// Returns the string representation of the algorithm identifier.
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             AlgorithmIdentifier::None => "none",
@@ -117,6 +118,7 @@ impl AlgorithmIdentifier {
 
     /// The JWK `kty` (key type) a key for this algorithm belongs to:
     /// `"RSA"`, `"EC"`, `"OKP"`, `"AKP"`, or `"oct"`. `None` for the `none` algorithm.
+    #[must_use]
     pub fn key_type(&self) -> Option<&'static str> {
         match self {
             AlgorithmIdentifier::None => None,
@@ -147,6 +149,7 @@ impl AlgorithmIdentifier {
     /// `Ed25519` implies the OKP curve `Ed25519`.
     /// `None` for algorithms that don't determine a single curve (including
     /// `EdDSA`, which admits both Ed25519 and Ed448).
+    #[must_use]
     pub fn ec_curve(&self) -> Option<&'static str> {
         match self {
             AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256 => Some("P-256"),

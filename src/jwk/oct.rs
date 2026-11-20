@@ -54,6 +54,7 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
     }
@@ -64,6 +65,7 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<super::KeyUse> {
         self.key_use
     }
@@ -79,6 +81,7 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// The typed algorithm metadata designated for this key, if set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         self.alg.as_ref()
     }
@@ -88,6 +91,7 @@ impl OctetSequenceJsonWebKey {
     /// The symmetric `k` value is only included for
     /// [`super::OutputControlLevel::IncludePrivate`] or
     /// [`super::OutputControlLevel::IncludeSymmetric`].
+    #[must_use]
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         use super::OutputControlLevel;
 
@@ -144,16 +148,19 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// The JWK key type: always `"oct"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         "oct"
     }
 
     /// The size of the symmetric key, in bits.
+    #[must_use]
     pub fn key_size_bits(&self) -> usize {
         self.oct_key.len() * 8
     }
 
     /// The raw symmetric key bytes.
+    #[must_use]
     pub fn key_bytes(&self) -> &[u8] {
         &self.oct_key
     }
@@ -169,6 +176,7 @@ impl OctetSequenceJsonWebKey {
     }
 
     /// Verifies an HMAC over a message in constant time.
+    #[must_use]
     pub fn verify(&self, message: &[u8], digest: DigestAlgorithm, signature: &[u8]) -> bool {
         // An unusable (e.g. too-short) key can never produce a valid
         // signature, so verification simply fails rather than panicking. The

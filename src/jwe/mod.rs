@@ -87,6 +87,7 @@ impl<'a> JsonWebEncryption<'a> {
     /// and a key, then call [`JsonWebEncryption::encrypt`]; or parse an
     /// existing token with
     /// [`JsonWebStructure::set_compact_serialization`] and decrypt it.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             buffer: ZeroizingVec::new(Vec::new()),
@@ -442,11 +443,13 @@ impl<'a> JsonWebEncryption<'a> {
     }
 
     /// Returns the key management algorithm header value, if set.
+    #[must_use]
     pub fn algorithm(&self) -> Option<&str> {
         self.header(HeaderParameter::Algorithm)
     }
 
     /// Returns the content encryption (`enc`) header value, if set.
+    #[must_use]
     pub fn encryption_method(&self) -> Option<&str> {
         self.header(HeaderParameter::EncryptionMethod)
     }

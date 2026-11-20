@@ -47,6 +47,7 @@ impl JsonWebKeySet {
     }
 
     /// Creates a set from existing keys.
+    #[must_use]
     pub fn from_keys(keys: Vec<JsonWebKey>) -> Self {
         Self { keys }
     }
@@ -57,6 +58,7 @@ impl JsonWebKeySet {
     }
 
     /// All keys in the set, in insertion order.
+    #[must_use]
     pub fn keys(&self) -> &[JsonWebKey] {
         &self.keys
     }
@@ -67,16 +69,19 @@ impl JsonWebKeySet {
     }
 
     /// Consumes the set, returning the keys.
+    #[must_use]
     pub fn into_keys(self) -> Vec<JsonWebKey> {
         self.keys
     }
 
     /// Returns `true` if the set contains no keys.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
     }
 
     /// The number of keys in the set.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.keys.len()
     }
@@ -116,6 +121,7 @@ impl JsonWebKeySet {
     /// declares one. It does **not** by itself try-verify to disambiguate
     /// when multiple keys share a `kid`; rely on
     /// `JsonWebSignature::verify_signature` for the final go/no-go.
+    #[must_use]
     pub fn find_key(
         &self,
         key_id: Option<&str>,
@@ -129,6 +135,7 @@ impl JsonWebKeySet {
     }
 
     /// Finds all keys matching the criteria (see [`find_key`](Self::find_key)).
+    #[must_use]
     pub fn find_keys(
         &self,
         key_id: Option<&str>,
@@ -174,6 +181,7 @@ impl JsonWebKeySet {
 
     /// Serializes the set to a JWKS JSON document. Keys are emitted at the
     /// given output control level.
+    #[must_use]
     pub fn to_json(&self, level: super::OutputControlLevel) -> String {
         // Each per-key buffer is exactly sized, so wiping `len` bytes wipes it all.
         let keys: Vec<Zeroizing<Vec<u8>>> = self

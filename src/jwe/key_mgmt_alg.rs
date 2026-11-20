@@ -87,6 +87,7 @@ impl std::str::FromStr for KeyManagementAlgorithm {
 
 impl KeyManagementAlgorithm {
     /// Returns the string representation of the key management algorithm.
+    #[must_use]
     pub fn name(&self) -> &'static str {
         match self {
             KeyManagementAlgorithm::Rsa15 => "RSA1_5",
