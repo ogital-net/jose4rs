@@ -474,16 +474,16 @@ impl OkpJsonWebKey {
 
     #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let x = value.get("x").map_or_else(
+        let x = value.get("x")?.map_or_else(
             || Err(JoseError::InvalidKey("missing 'x' parameter".to_string())),
             |v| Ok(base64::url_decode(v)?),
         )?;
 
-        let d = value.get("d").map(base64::url_decode).transpose()?;
+        let d = value.get("d")?.map(base64::url_decode).transpose()?;
 
-        let alg = value.get("alg").map(str::parse).transpose()?;
+        let alg = value.get("alg")?.map(str::parse).transpose()?;
 
-        let curve = match value.get("crv") {
+        let curve = match value.get("crv")? {
             Some("Ed25519") => Ok(OkpCurve::Ed25519),
             Some("X25519") => Ok(OkpCurve::X25519),
             Some(crv) => Err(JoseError::InvalidKey(format!("unsupported curve '{crv}'"))),
@@ -506,10 +506,10 @@ impl OkpJsonWebKey {
             Self::from_bytes(curve, &x, false)?
         };
         jwk.alg = alg;
-        jwk.x5t = value.get("x5t").map(str::to_string);
-        jwk.x5t_s256 = value.get("x5t#S256").map(str::to_string);
-        jwk.key_id = value.get("kid").map(str::to_string);
-        jwk.key_use = value.get("use").map(str::parse).transpose()?;
+        jwk.x5t = value.get("x5t")?.map(str::to_string);
+        jwk.x5t_s256 = value.get("x5t#S256")?.map(str::to_string);
+        jwk.key_id = value.get("kid")?.map(str::to_string);
+        jwk.key_use = value.get("use")?.map(str::parse).transpose()?;
         Ok(jwk)
     }
 

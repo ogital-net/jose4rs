@@ -5,7 +5,7 @@ use crate::{
     crypto::{DigestAlgorithm, RsaPadding, aead, aes, mem, pbkdf2, rand::rand_bytes},
     error::JoseError,
     jwe::{ContentEncryptionAlgorithm, ContentEncryptionKeys, kdf},
-    jwk::{JsonWebKey, JwkAlgorithm},
+    jwk::{JsonWebKey, JwkAlgorithm, KeyUse},
     jwx::HeaderParameter,
 };
 use simd_json::{
@@ -550,6 +550,7 @@ impl KeyManagementAlgorithm {
         management_key: &JsonWebKey,
         content_enc_alg: ContentEncryptionAlgorithm,
     ) -> Result<(), JoseError> {
+        management_key.validate_key_policy(KeyUse::Encryption)?;
         let matches = match management_key.jwk_algorithm() {
             None => true,
             Some(JwkAlgorithm::Jwe(algorithm)) => *algorithm == self,

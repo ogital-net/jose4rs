@@ -1,8 +1,8 @@
 //! JSON Web Encryption ([RFC 7516](https://www.rfc-editor.org/rfc/rfc7516)).
 //!
 //! [`JsonWebEncryption`] supports compact serialization, not JWE JSON
-//! serialization. Key management (`alg`) and content encryption (`enc`) have
-//! separate algorithm constraints. The optional `zip` feature enables DEFLATE
+//! serialization. Algorithm constraints apply to key management (`alg`), not
+//! content encryption (`enc`). The optional `zip` feature enables DEFLATE
 //! compression with a configurable decompressed size limit.
 //!
 //! Parsing does not authenticate or decrypt the ciphertext. Use
@@ -22,8 +22,9 @@ pub use content_enc_alg::ContentEncryptionAlgorithm;
 pub use key_mgmt_alg::KeyManagementAlgorithm;
 use simd_json::{
     ValueBuilder,
+    base::ValueAsScalar as _,
     derived::{MutableObject, TypedObjectValue as _, ValueObjectAccessAsScalar as _},
-    prelude::Writable as _,
+    prelude::{ValueObjectAccess as _, Writable as _},
 };
 
 use crate::{
@@ -293,6 +294,9 @@ impl<'a> JsonWebEncryption<'a> {
         self.invalidate_encryption();
         let key_mgmt_alg = self.get_key_mgmt_alg(true)?;
         let content_enc_alg = self.get_content_enc_alg()?;
+        if let Some(header) = &self.header {
+            Self::check_optional_string_headers(header)?;
+        }
 
         let plaintext_ref = self
             .plaintext
@@ -537,6 +541,7 @@ impl<'a> JsonWebEncryption<'a> {
         // implementation supports no JWE critical extensions, so any `crit`
         // name is rejected.
         crate::jwx::check_crit(&header, &[])?;
+        Self::check_optional_string_headers(&header)?;
 
         self.header = Some(header);
         self.encoded_header = Some(encoded_header_ref);
@@ -546,6 +551,26 @@ impl<'a> JsonWebEncryption<'a> {
         self.auth_tag = Some(auth_tag);
         self.plaintext = None;
 
+        Ok(())
+    }
+
+    fn check_optional_string_headers(header: &simd_json::OwnedValue) -> Result<(), JoseError> {
+        for parameter in [
+            HeaderParameter::Zip,
+            HeaderParameter::AgreementPartyUInfo,
+            HeaderParameter::AgreementPartyVInfo,
+            HeaderParameter::Pbes2SaltInput,
+        ] {
+            let name = parameter.name();
+            if header
+                .get(name)
+                .is_some_and(|value| value.as_str().is_none())
+            {
+                return Err(JoseError::InvalidHeader(format!(
+                    "JWE '{name}' header parameter must be a string"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -1312,6 +1337,86 @@ mod tests {
         let decrypt_error = dec.payload(&mismatched_key).unwrap_err();
         assert!(matches!(decrypt_error, JoseError::InvalidKey(_)));
         assert!(decrypt_error.to_string().contains("A256GCMKW"));
+    }
+
+    #[test]
+    fn rejects_signature_key_use_on_encrypt_and_decrypt() {
+        let encryption_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256GCM","use":"enc"}"#,
+        )
+        .unwrap();
+        let signing_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256GCM","use":"sig"}"#,
+        )
+        .unwrap();
+
+        let mut jwe = JsonWebEncryption::new();
+        jwe.set_algorithm(KeyManagementAlgorithm::Direct);
+        jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes256Gcm);
+        jwe.set_payload(b"message");
+        assert!(matches!(
+            jwe.encrypt(&signing_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("'use'")
+        ));
+
+        jwe.encrypt(&encryption_key).unwrap();
+        let compact = jwe.compact_serialization().unwrap();
+        let mut parsed = JsonWebEncryption::from_compact_serialization(&compact).unwrap();
+        assert!(matches!(
+            parsed.payload(&signing_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("'use'")
+        ));
+        assert_eq!(parsed.payload(&encryption_key).unwrap(), b"message");
+    }
+
+    #[test]
+    fn rejects_rsa_keys_below_2048_bits_on_encrypt_and_decrypt() {
+        let algorithm = KeyManagementAlgorithm::RsaOaep256;
+        let generator = crate::jwk::JsonWebKeyGenerator::for_encryption(algorithm);
+        let encryption_key = generator.generate().unwrap();
+        let undersized_key = generator.with_key_bits(1024).generate().unwrap();
+
+        let mut jwe = JsonWebEncryption::new();
+        jwe.set_algorithm(algorithm);
+        jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+        jwe.set_payload(b"message");
+        assert!(matches!(
+            jwe.encrypt(&undersized_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("2048 bits")
+        ));
+
+        jwe.encrypt(&encryption_key).unwrap();
+        let compact = jwe.compact_serialization().unwrap();
+        let mut parsed = JsonWebEncryption::from_compact_serialization(&compact).unwrap();
+        assert!(matches!(
+            parsed.payload(&undersized_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("2048 bits")
+        ));
+        assert_eq!(parsed.payload(&encryption_key).unwrap(), b"message");
+    }
+
+    #[test]
+    fn rejects_non_string_optional_jwe_headers() {
+        let key = JsonWebKey::from_json(r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAA"}"#).unwrap();
+        for name in ["zip", "apu", "apv", "p2s"] {
+            let mut jwe = JsonWebEncryption::new();
+            jwe.set_algorithm(KeyManagementAlgorithm::Direct);
+            jwe.set_encryption_method(ContentEncryptionAlgorithm::Aes128Gcm);
+            jwe.set_payload(b"message");
+            jwe.set_header_value(name, simd_json::OwnedValue::from(false));
+            assert!(matches!(
+                jwe.encrypt(&key),
+                Err(JoseError::InvalidHeader(message)) if message.contains(name)
+            ));
+
+            let header = format!(r#"{{"alg":"dir","enc":"A128GCM","{name}":null}}"#);
+            let encoded = base64::url_encode(header.as_bytes());
+            let compact = format!("{}....", std::str::from_utf8(&encoded).unwrap());
+            assert!(matches!(
+                JsonWebEncryption::from_compact_serialization(&compact),
+                Err(JoseError::InvalidHeader(message)) if message.contains(name)
+            ));
+        }
     }
 
     #[test]

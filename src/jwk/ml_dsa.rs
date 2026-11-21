@@ -457,12 +457,12 @@ impl MlDsaJsonWebKey {
 
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
         let alg = value
-            .get("alg")
+            .get("alg")?
             .ok_or_else(|| JoseError::InvalidKey("missing 'alg' parameter".to_string()))?;
         let declared_params = MlDsaParameterSet::from_jose_name(alg)?;
 
         let pub_b64 = value
-            .get("pub")
+            .get("pub")?
             .ok_or_else(|| JoseError::InvalidKey("missing 'pub' parameter".to_string()))?;
         let pub_bytes: Box<[u8]> = base64::url_decode(pub_b64)?;
         let params = MlDsaParameterSet::from_public_key_len(pub_bytes.len())?;
@@ -476,7 +476,7 @@ impl MlDsaJsonWebKey {
         // the caller supplies a `priv`, verify it round-trips to the same
         // public key as `pub`.
         let priv_bytes = value
-            .get("priv")
+            .get("priv")?
             .map(|encoded| base64::url_decode(encoded).map(crate::crypto::mem::Zeroizing::new))
             .transpose()?;
 
@@ -506,10 +506,10 @@ impl MlDsaJsonWebKey {
             Self::new(evp_pkey)
         };
 
-        jwk.x5t = value.get("x5t").map(str::to_string);
-        jwk.x5t_s256 = value.get("x5t#S256").map(str::to_string);
-        jwk.key_id = value.get("kid").map(str::to_string);
-        jwk.key_use = value.get("use").map(str::parse).transpose()?;
+        jwk.x5t = value.get("x5t")?.map(str::to_string);
+        jwk.x5t_s256 = value.get("x5t#S256")?.map(str::to_string);
+        jwk.key_id = value.get("kid")?.map(str::to_string);
+        jwk.key_use = value.get("use")?.map(str::parse).transpose()?;
         Ok(jwk)
     }
 

@@ -190,15 +190,15 @@ impl OctetSequenceJsonWebKey {
 
     #[allow(clippy::needless_pass_by_value)]
     pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
-        let alg = value.get("alg").map(str::parse).transpose()?;
+        let alg = value.get("alg")?.map(str::parse).transpose()?;
 
-        let k = match value.get("k") {
+        let k = match value.get("k")? {
             Some(k) => base64::url_decode(k)?,
             None => return Err(JoseError::InvalidKey("missing 'k' parameter".into())),
         };
         let mut jwk = Self::new(k, alg);
-        jwk.key_id = value.get("kid").map(str::to_string);
-        jwk.key_use = value.get("use").map(str::parse).transpose()?;
+        jwk.key_id = value.get("kid")?.map(str::to_string);
+        jwk.key_use = value.get("use")?.map(str::parse).transpose()?;
         Ok(jwk)
     }
 }

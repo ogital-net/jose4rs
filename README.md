@@ -68,7 +68,7 @@ C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its ext
 ## Design properties
 
 - **Low-allocation hot paths.** Compact JWS and JWE parsing read directly from the input and keep token parts in a single owned buffer rather than allocating separately for each part. SIMD base64 (`base64-simd`) and `simd-json` are used by default.
-- **Algorithm constraints.** Use `AlgorithmConstraints` with `ConstraintType::Permit` to pin allowed `alg` values and, for JWE, allowed `enc` values. Choose the policy from trusted application configuration, not from the token. Default constraints block `none` for JWS and RSA1_5 and PBES2 for JWE.
+- **Algorithm constraints.** Use `AlgorithmConstraints` with `ConstraintType::Permit` to pin allowed `alg` values. For JWE, check `encryption_method()` separately if your application restricts `enc`. Choose the policy from trusted application configuration, not from the token. Default constraints block `none` for JWS and RSA1_5 and PBES2 for JWE.
 - **Key selection.** Use `VerificationJwkSelector::select_unique` or the cached `select_unique_verification_key` methods to reject ambiguous matches and mismatched explicit JWK `alg` values. Selection does not verify the signature or establish trust in the JWKS.
 
 [AWS-LC]: https://github.com/aws/aws-lc

@@ -13,7 +13,9 @@ use ec::EcJsonWebKey;
 use oct::OctetSequenceJsonWebKey;
 use okp::OkpJsonWebKey;
 use rsa::RsaJsonWebKey;
-use simd_json::derived::ValueObjectAccessAsScalar as _;
+use simd_json::{
+    base::ValueAsScalar, derived::ValueObjectAccessAsScalar as _, prelude::ValueObjectAccess,
+};
 
 use crate::{
     crypto::{Bio, EcCurve, EvpPkey, EvpPkeyType, RsaRef, mem::Zeroizing, rand::rand_bytes},
@@ -251,25 +253,35 @@ impl std::fmt::Debug for JsonWebKey {
 }
 
 pub(super) trait GetStr {
-    fn get(&self, key: &str) -> Option<&str>;
+    fn get(&self, key: &str) -> Result<Option<&str>, JoseError>;
 }
 
 impl GetStr for BTreeMap<String, String> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.get(key).map(std::string::String::as_str)
+    fn get(&self, key: &str) -> Result<Option<&str>, JoseError> {
+        Ok(self.get(key).map(String::as_str))
     }
 }
 
 impl GetStr for simd_json::BorrowedValue<'_> {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.get_str(key)
+    fn get(&self, key: &str) -> Result<Option<&str>, JoseError> {
+        ValueObjectAccess::get(self, key)
+            .map(|value| jwk_string(value, key))
+            .transpose()
     }
 }
 
 impl GetStr for &simd_json::OwnedValue {
-    fn get(&self, key: &str) -> Option<&str> {
-        self.get_str(key)
+    fn get(&self, key: &str) -> Result<Option<&str>, JoseError> {
+        ValueObjectAccess::get(*self, key)
+            .map(|value| jwk_string(value, key))
+            .transpose()
     }
+}
+
+fn jwk_string<'a>(value: &'a impl ValueAsScalar, key: &str) -> Result<&'a str, JoseError> {
+    value
+        .as_str()
+        .ok_or_else(|| JoseError::InvalidKey(format!("JWK '{key}' parameter must be a string")))
 }
 
 /// Fixed-size JWK JSON buffer. It cannot grow, so key material is never left
@@ -755,6 +767,27 @@ impl JsonWebKey {
             JsonWebKey::MlDsa(ml_dsa) => ml_dsa.key_use(),
             JsonWebKey::Oct(oct) => oct.key_use(),
         }
+    }
+
+    pub(crate) fn validate_key_policy(&self, required_use: KeyUse) -> Result<(), JoseError> {
+        const MIN_RSA_KEY_BITS: usize = 2048;
+
+        if let Some(key_use) = self.key_use()
+            && key_use != required_use
+        {
+            return Err(JoseError::InvalidKey(format!(
+                "key has JWK 'use' '{key_use}' but the operation requires '{required_use}'"
+            )));
+        }
+        if let Self::Rsa(key) = self {
+            let bits = key.key_size_bits();
+            if bits < MIN_RSA_KEY_BITS {
+                return Err(JoseError::InvalidKey(format!(
+                    "JOSE RSA algorithms require a key of at least {MIN_RSA_KEY_BITS} bits (got {bits})"
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// The algorithm (`alg`) designated for this key, if set.

@@ -21,27 +21,22 @@ impl JsonWebKeySet {
     ///
     /// # Errors
     ///
-    /// Returns an error if the JSON is malformed or has no `"keys"` member.
+    /// Returns an error unless the JSON is valid and `"keys"` is an array.
     /// Individual keys that fail to parse are skipped, not treated as errors,
     /// so the resulting set may be empty (or smaller than the source array).
     pub fn from_json(json: impl AsRef<[u8]>) -> Result<Self, JoseError> {
         let mut buf = json.as_ref().to_vec();
         let value = simd_json::to_owned_value(&mut buf).map_err(JoseError::json)?;
 
-        let keys_value = value
+        let entries = value
             .get("keys")
-            .ok_or_else(|| JoseError::InvalidJson("JWKS has no \"keys\" member".into()))?;
+            .and_then(|keys| keys.as_array())
+            .ok_or_else(|| JoseError::InvalidJson("JWKS 'keys' must be an array".into()))?;
 
-        let mut keys = Vec::new();
-        if let Some(arr) = keys_value.as_array() {
-            for key_value in arr {
-                // Tolerate individual unparseable keys: skip them rather than
-                // failing the whole set (jose4j behavior).
-                if let Ok(jwk) = JsonWebKey::from_value(key_value) {
-                    keys.push(jwk);
-                }
-            }
-        }
+        let keys = entries
+            .iter()
+            .filter_map(|key| JsonWebKey::from_value(key).ok())
+            .collect();
 
         Ok(Self { keys })
     }
@@ -313,6 +308,32 @@ mod tests {
     fn test_missing_keys_member_is_error() {
         assert!(JsonWebKeySet::from_json(r#"{"notkeys":[]}"#).is_err());
         assert!(JsonWebKeySet::from_json("not json").is_err());
+    }
+
+    #[test]
+    fn non_array_keys_member_is_error() {
+        for value in ["null", "{}", "42", "\"[]\""] {
+            assert!(matches!(
+                JsonWebKeySet::from_json(format!(r#"{{"keys":{value}}}"#)),
+                Err(JoseError::InvalidJson(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn malformed_jwk_metadata_is_rejected() {
+        for (field, value) in [("alg", "null"), ("use", "[]"), ("kid", "42")] {
+            let malformed = format!(r#"{{"kty":"oct","k":"AA","{field}":{value}}}"#);
+            assert!(matches!(
+                JsonWebKey::from_json(&malformed),
+                Err(JoseError::InvalidKey(message)) if message.contains(field)
+            ));
+            let set = JsonWebKeySet::from_json(format!(
+                r#"{{"keys":[{malformed},{{"kty":"oct","k":"AA","extension":{{}}}}]}}"#
+            ))
+            .unwrap();
+            assert_eq!(set.len(), 1, "{field}");
+        }
     }
 
     #[test]

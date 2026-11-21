@@ -482,7 +482,7 @@ impl RsaJsonWebKey {
         let mut scratch = ZeroizingVec::new(Vec::new());
         let mut decode_param = |key: &str| -> Result<Option<BigNum>, JoseError> {
             value
-                .get(key)
+                .get(key)?
                 .map(|encoded| {
                     scratch.append_with(base64::url_decode_size(encoded.len()), |dst| {
                         base64::url_decode_append(encoded, dst)
@@ -534,13 +534,13 @@ impl RsaJsonWebKey {
             }
         }
 
-        let alg = value.get("alg").map(str::parse).transpose()?;
+        let alg = value.get("alg")?.map(str::parse).transpose()?;
 
         let mut jwk = Self::new(EvpPkey::from_rsa(rsa), alg);
-        jwk.x5t = value.get("x5t").map(str::to_string);
-        jwk.x5t_s256 = value.get("x5t#S256").map(str::to_string);
-        jwk.key_id = value.get("kid").map(str::to_string);
-        jwk.key_use = value.get("use").map(str::parse).transpose()?;
+        jwk.x5t = value.get("x5t")?.map(str::to_string);
+        jwk.x5t_s256 = value.get("x5t#S256")?.map(str::to_string);
+        jwk.key_id = value.get("kid")?.map(str::to_string);
+        jwk.key_use = value.get("use")?.map(str::parse).transpose()?;
         Ok(jwk)
     }
 }

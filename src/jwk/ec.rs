@@ -403,14 +403,14 @@ impl EcJsonWebKey {
         // can be enforced (RFC 7518 Section 6.2.1: coordinates MUST be exactly
         // the field size; a BigNum value alone loses the encoded length).
         let curve = value
-            .get("crv")
+            .get("crv")?
             .ok_or_else(|| JoseError::InvalidKey("missing 'crv' parameter".to_string()))?;
         let curve: EcCurve = curve.try_into()?;
         let coord_len = curve.coordinate_len();
 
         let decode_coord = |key: &str| -> Result<BigNum, JoseError> {
             let encoded = value
-                .get(key)
+                .get(key)?
                 .ok_or_else(|| JoseError::InvalidKey(format!("missing '{key}' parameter")))?;
             let bytes = crate::base64::url_decode(encoded)?;
             if bytes.len() != coord_len {
@@ -425,7 +425,7 @@ impl EcJsonWebKey {
         let x = decode_coord("x")?;
         let y = decode_coord("y")?;
         let d = value
-            .get("d")
+            .get("d")?
             .map(|encoded| -> Result<BigNum, JoseError> {
                 let bytes = Zeroizing::new(crate::base64::url_decode(encoded)?);
                 Ok(bytes.as_ref().into())
@@ -440,13 +440,13 @@ impl EcJsonWebKey {
         }
         ec_key.check_key()?;
 
-        let alg = value.get("alg").map(str::parse).transpose()?;
+        let alg = value.get("alg")?.map(str::parse).transpose()?;
 
         let mut jwk = Self::new(EvpPkey::from_ec_key(ec_key), alg);
-        jwk.x5t = value.get("x5t").map(str::to_string);
-        jwk.x5t_s256 = value.get("x5t#S256").map(str::to_string);
-        jwk.key_id = value.get("kid").map(str::to_string);
-        jwk.key_use = value.get("use").map(str::parse).transpose()?;
+        jwk.x5t = value.get("x5t")?.map(str::to_string);
+        jwk.x5t_s256 = value.get("x5t#S256")?.map(str::to_string);
+        jwk.key_id = value.get("kid")?.map(str::to_string);
+        jwk.key_use = value.get("use")?.map(str::parse).transpose()?;
         Ok(jwk)
     }
 

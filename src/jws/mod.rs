@@ -29,11 +29,9 @@ use crate::{
     crypto::DigestAlgorithm,
     error::JoseError,
     jwa::{AlgorithmConstraints, BLOCK_NONE},
-    jwk::{JsonWebKey, JwkAlgorithm},
+    jwk::{JsonWebKey, JwkAlgorithm, KeyUse},
     jwx::JsonWebStructure,
 };
-
-const MIN_RSA_KEY_BITS: usize = 2048;
 
 /// Reads the RFC 7797 `b64` flag from a parsed protected header.
 ///
@@ -1192,6 +1190,7 @@ impl<'a> JsonWebSignature<'a> {
 /// verifying, signing, or producing a compact serialization -- no need to
 /// duplicate the validation at each call site.
 fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<(), JoseError> {
+    key.validate_key_policy(KeyUse::Signature)?;
     // RFC 7517 Section 4.4: a key with an `alg` member is intended only
     // for that algorithm. Reject same-family algorithm drift (e.g.
     // a key tagged HS256 verifying HS384).
@@ -1203,16 +1202,7 @@ fn validate_key_for_alg(key: &JsonWebKey, alg: AlgorithmIdentifier) -> Result<()
         )));
     }
     match key {
-        JsonWebKey::Rsa(rsa_key) => {
-            if rsa_key.key_size_bits() < MIN_RSA_KEY_BITS {
-                return Err(JoseError::InvalidKey(format!(
-                    "an RSA key of size {MIN_RSA_KEY_BITS} bits or larger MUST be used with the all JOSE \
-                    RSA algorithms (given key was only {} bits)",
-                    rsa_key.key_size_bits()
-                )));
-            }
-            Ok(())
-        }
+        JsonWebKey::Rsa(_) => Ok(()),
         JsonWebKey::Oct(oct_key) => {
             // RFC 7518 Section 3.2: an HMAC key of the same size as the hash
             // output or larger MUST be used. jose4j enforces the same
@@ -1919,6 +1909,34 @@ mod tests {
                 JsonWebSignature::from_flattened_json_serialization(&json_serialization).unwrap();
             assert_eq!(jws.payload(&key).unwrap(), payload);
         }
+    }
+
+    #[test]
+    fn rejects_encryption_key_use_on_sign_and_verify() {
+        let signing_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"HS256","use":"sig"}"#,
+        )
+        .unwrap();
+        let encryption_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"HS256","use":"enc"}"#,
+        )
+        .unwrap();
+
+        let mut jws = JsonWebSignature::new();
+        jws.set_algorithm(AlgorithmIdentifier::HmacSha256);
+        jws.set_payload(b"message");
+        assert!(matches!(
+            jws.compact_serialization(&encryption_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("'use'")
+        ));
+
+        let compact = jws.compact_serialization(&signing_key).unwrap();
+        let parsed = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+        assert!(matches!(
+            parsed.payload(&encryption_key),
+            Err(JoseError::InvalidKey(message)) if message.contains("'use'")
+        ));
+        assert_eq!(parsed.payload(&signing_key).unwrap(), b"message");
     }
 
     #[test]
