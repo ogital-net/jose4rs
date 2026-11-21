@@ -778,7 +778,7 @@ impl EvpPkey {
         padding: RsaPadding,
         digest_alg: digest::Algorithm,
         ciphertext: &[u8],
-    ) -> Result<Box<[u8]>, JoseError> {
+    ) -> Result<mem::ZeroizingVec, JoseError> {
         let mut pctx = self.rsaes_init(false, padding, digest_alg);
 
         // Determine the maximum length of the plaintext.
@@ -796,26 +796,24 @@ impl EvpPkey {
             "EVP_PKEY_decrypt() failed"
         );
 
-        let mut plaintext = Vec::with_capacity(out_len);
+        let mut plaintext = mem::ZeroizingVec::new(vec![0; out_len]);
         let ret = unsafe {
             EVP_PKEY_decrypt(
                 pctx.as_mut_ptr(),
-                plaintext.as_mut_ptr(),
+                plaintext.as_mut_slice().as_mut_ptr(),
                 &raw mut out_len,
                 ciphertext.as_ptr(),
                 ciphertext.len(),
             )
         };
-        if ret != 1 {
+        if ret != 1 || out_len > plaintext.len() {
             return Err(JoseError::IntegrityError(
                 "asymmetric decryption failed (ciphertext integrity check failed)".into(),
             ));
         }
 
-        unsafe {
-            plaintext.set_len(out_len);
-        }
-        Ok(plaintext.into_boxed_slice())
+        plaintext.truncate(out_len);
+        Ok(plaintext)
     }
 
     pub(crate) fn get_ec_curve(&self) -> Option<Curve> {
@@ -1183,7 +1181,8 @@ FjsRvi0CAwEAAQ==
             let plain = rand_bytes(64);
             let ciphertext = evp.rsa_encrypt(padding, md, &plain);
             let out = evp.rsa_decrypt(padding, md, &ciphertext).unwrap();
-            assert_eq!(*plain, *out);
+            assert_eq!(&*plain, out.as_slice());
+            assert!(out.capacity() >= ciphertext.len());
         }
     }
 

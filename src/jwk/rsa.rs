@@ -445,6 +445,7 @@ impl RsaJsonWebKey {
     pub fn decrypt_pcks1_1_5(&self, plaintext: &[u8]) -> Result<Box<[u8]>, JoseError> {
         self.evp_pkey
             .rsa_decrypt(RsaPadding::Pkcs1, DigestAlgorithm::Sha1, plaintext)
+            .map(|out| Box::from(out.as_slice()))
     }
 
     /// Encrypts with RSAES-OAEP using the given digest (JWE `RSA-OAEP*` key management).
@@ -465,6 +466,7 @@ impl RsaJsonWebKey {
     ) -> Result<Box<[u8]>, JoseError> {
         self.evp_pkey
             .rsa_decrypt(RsaPadding::Pkcs1Oaep, digest_alg, plaintext)
+            .map(|out| Box::from(out.as_slice()))
     }
 
     #[allow(clippy::needless_pass_by_value)]

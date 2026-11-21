@@ -1,8 +1,8 @@
-use std::fmt;
+use std::{fmt, ops::Deref};
 
 use crate::{
     base64,
-    crypto::{DigestAlgorithm, aead, aes, mem, pbkdf2, rand::rand_bytes},
+    crypto::{DigestAlgorithm, RsaPadding, aead, aes, mem, pbkdf2, rand::rand_bytes},
     error::JoseError,
     jwe::{ContentEncryptionAlgorithm, ContentEncryptionKeys, kdf},
     jwk::{JsonWebKey, JwkAlgorithm},
@@ -84,6 +84,22 @@ impl std::str::FromStr for KeyManagementAlgorithm {
             alg => Err(JoseError::InvalidAlgorithm(format!(
                 "unsupported key management algorithm: {alg}"
             ))),
+        }
+    }
+}
+
+pub(super) enum DecryptedKey {
+    Rsa(mem::ZeroizingVec),
+    Boxed(mem::Zeroizing<Box<[u8]>>),
+}
+
+impl Deref for DecryptedKey {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Rsa(key) => key.as_slice(),
+            Self::Boxed(key) => key,
         }
     }
 }
@@ -215,39 +231,31 @@ impl KeyManagementAlgorithm {
         content_enc_alg: ContentEncryptionAlgorithm,
         encrypted_key: &[u8],
         headers: &simd_json::owned::Value,
-    ) -> Result<mem::Zeroizing<Box<[u8]>>, JoseError> {
+    ) -> Result<DecryptedKey, JoseError> {
         self.validate_key_algorithm(management_key, content_enc_alg)?;
+        let decrypt_rsa = |padding, digest| match management_key {
+            JsonWebKey::Rsa(rsa_key) => rsa_key
+                .evp_pkey()
+                .rsa_decrypt(padding, digest, encrypted_key)
+                .map(DecryptedKey::Rsa),
+            _ => Err(JoseError::InvalidKey("invalid key type".into())),
+        };
         match self {
-            KeyManagementAlgorithm::Rsa15 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key
-                    .decrypt_pcks1_1_5(encrypted_key)
-                    .map(mem::Zeroizing::new),
-                _ => Err(JoseError::InvalidKey("invalid key type".into())),
-            },
-            KeyManagementAlgorithm::RsaOaep => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key
-                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha1)
-                    .map(mem::Zeroizing::new),
-                _ => Err(JoseError::InvalidKey("invalid key type".into())),
-            },
-            KeyManagementAlgorithm::RsaOaep256 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key
-                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha256)
-                    .map(mem::Zeroizing::new),
-                _ => Err(JoseError::InvalidKey("invalid key type".into())),
-            },
-            KeyManagementAlgorithm::RsaOaep384 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key
-                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha384)
-                    .map(mem::Zeroizing::new),
-                _ => Err(JoseError::InvalidKey("invalid key type".into())),
-            },
-            KeyManagementAlgorithm::RsaOaep512 => match management_key {
-                JsonWebKey::Rsa(rsa_key) => rsa_key
-                    .decrypt_oaep(encrypted_key, DigestAlgorithm::Sha512)
-                    .map(mem::Zeroizing::new),
-                _ => Err(JoseError::InvalidKey("invalid key type".into())),
-            },
+            KeyManagementAlgorithm::Rsa15 => {
+                return decrypt_rsa(RsaPadding::Pkcs1, DigestAlgorithm::Sha1);
+            }
+            KeyManagementAlgorithm::RsaOaep => {
+                return decrypt_rsa(RsaPadding::Pkcs1Oaep, DigestAlgorithm::Sha1);
+            }
+            KeyManagementAlgorithm::RsaOaep256 => {
+                return decrypt_rsa(RsaPadding::Pkcs1Oaep, DigestAlgorithm::Sha256);
+            }
+            KeyManagementAlgorithm::RsaOaep384 => {
+                return decrypt_rsa(RsaPadding::Pkcs1Oaep, DigestAlgorithm::Sha384);
+            }
+            KeyManagementAlgorithm::RsaOaep512 => {
+                return decrypt_rsa(RsaPadding::Pkcs1Oaep, DigestAlgorithm::Sha512);
+            }
             KeyManagementAlgorithm::EcdhEs => {
                 // RFC 7516 Section 5.2 step 6: for direct key agreement the JWE
                 // Encrypted Key MUST be the empty octet sequence.
@@ -551,6 +559,7 @@ impl KeyManagementAlgorithm {
                 Ok(mem::Zeroizing::new(Box::from(key_bytes)))
             }
         }
+        .map(DecryptedKey::Boxed)
     }
 
     fn validate_key_algorithm(
