@@ -62,6 +62,13 @@ pub(super) struct ContentEncryptionParts {
 /// A parsed or in-progress JWE. After parsing with
 /// [`JsonWebStructure::set_compact_serialization`], decrypt by calling
 /// [`JsonWebEncryption::payload`].
+///
+/// # Reuse
+///
+/// Parsing another token, replacing the payload, or encrypting again can grow
+/// the internal buffer because storage from previous operations is retained
+/// until this object is dropped. Prefer a fresh instance per token in
+/// long-running applications.
 pub struct JsonWebEncryption<'a> {
     buffer: ZeroizingVec,
     header: Option<simd_json::owned::Value>,

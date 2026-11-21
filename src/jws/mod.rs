@@ -71,6 +71,12 @@ fn header_b64_flag(header: &simd_json::owned::Value) -> Result<bool, JoseError> 
 /// Editing a protected header or replacing the payload invalidates the parsed
 /// signature. Serialize with a signing key to produce a new signature.
 ///
+/// # Reuse
+///
+/// Parsing another token or replacing the payload can grow the internal buffer
+/// because storage from previous operations is retained until this object is
+/// dropped. Prefer a fresh instance per token in long-running applications.
+///
 /// # Formats
 ///
 /// - **Compact Serialization**: URL-safe format suitable for HTTP headers
