@@ -559,7 +559,13 @@ impl EvpPkey {
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid private key DER".into()));
         }
-        Ok(unsafe { Self::from_raw_ptr(pkey) })
+        let pkey = unsafe { Self::from_raw_ptr(pkey) };
+        if !ptr::eq(inp, der.as_ptr_range().end) {
+            return Err(JoseError::InvalidKey(
+                "trailing bytes after private key DER".into(),
+            ));
+        }
+        Ok(pkey)
     }
 
     /// Parses a public key from SPKI DER.
@@ -573,7 +579,13 @@ impl EvpPkey {
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid public key DER".into()));
         }
-        Ok(unsafe { Self::from_raw_ptr(pkey) })
+        let pkey = unsafe { Self::from_raw_ptr(pkey) };
+        if !ptr::eq(inp, der.as_ptr_range().end) {
+            return Err(JoseError::InvalidKey(
+                "trailing bytes after public key DER".into(),
+            ));
+        }
+        Ok(pkey)
     }
 
     pub(crate) fn private_key_to_pem(&self) -> Result<Box<str>, JoseError> {

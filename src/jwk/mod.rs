@@ -538,7 +538,8 @@ impl JsonWebKey {
     /// Parses a key from DER, auto-detecting the format.
     ///
     /// Accepts PKCS#8 private keys, legacy (PKCS#1 / SEC1) private keys,
-    /// and `SubjectPublicKeyInfo` (SPKI) public keys.
+    /// and `SubjectPublicKeyInfo` (SPKI) public keys. The input must contain
+    /// exactly one key, without trailing bytes.
     ///
     /// # Errors
     ///
@@ -1711,6 +1712,23 @@ mod tests {
         let rsa_der = rsa.to_pkcs8_der().unwrap();
         assert!(ec::EcJsonWebKey::from_der(&rsa_der).is_err());
         assert!(okp::OkpJsonWebKey::from_der(&rsa_der).is_err());
+    }
+
+    #[test]
+    fn rejects_trailing_der_bytes() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::Ed25519)
+            .generate()
+            .unwrap();
+
+        for der in [key.to_pkcs8_der().unwrap(), key.to_spki_der().unwrap()] {
+            assert!(JsonWebKey::from_der(&der).is_ok());
+            let mut input = der.into_vec();
+            input.push(0);
+            assert!(matches!(
+                JsonWebKey::from_der(&input),
+                Err(JoseError::InvalidKey(_))
+            ));
+        }
     }
 
     #[test]

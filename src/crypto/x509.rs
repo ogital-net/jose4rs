@@ -24,11 +24,17 @@ impl X509Cert {
             .try_into()
             .map_err(|_| JoseError::InvalidKey("X.509 certificate DER is too large".into()))?;
         // d2i_X509() advances the input pointer, so use a local copy.
-        let mut ptr = der.as_ptr();
-        let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut ptr, len) };
-        ptr::NonNull::new(x509)
+        let mut input = der.as_ptr();
+        let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut input, len) };
+        let cert = ptr::NonNull::new(x509)
             .map(Self)
-            .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate DER".into()))
+            .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate DER".into()))?;
+        if !ptr::eq(input, der.as_ptr_range().end) {
+            return Err(JoseError::InvalidKey(
+                "trailing bytes after X.509 certificate DER".into(),
+            ));
+        }
+        Ok(cert)
     }
 
     /// Parses a PEM-encoded X.509 certificate.
@@ -139,6 +145,16 @@ mod tests {
         let cert = X509Cert::from_der(&der()).expect("d2i_X509 parse");
         let key = cert.public_key().expect("X509_get_pubkey");
         assert_eq!(key.key_type(), crate::crypto::EvpPkeyType::Rsa);
+    }
+
+    #[test]
+    fn rejects_trailing_der_bytes() {
+        let mut input = der().into_vec();
+        input.push(0);
+        assert!(matches!(
+            X509Cert::from_der(&input),
+            Err(JoseError::InvalidKey(_))
+        ));
     }
 
     #[test]
