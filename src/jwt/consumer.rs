@@ -4,7 +4,7 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::error::JoseError;
-use crate::jwt::{AudienceInfo, JwtClaims, TimeClaim};
+use crate::jwt::{AudienceInfo, JwtClaims, NANOS_PER_SECOND, TimeClaim};
 
 /// Stable, typed identifier for a JWT validation failure.
 ///
@@ -75,8 +75,8 @@ impl ErrorCode {
     pub const JSON_INVALID: ErrorCode = ErrorCode(16);
     /// Catch-all for failures that don't fit a more specific code.
     pub const MISCELLANEOUS: ErrorCode = ErrorCode(17);
-    /// A registered time claim (`exp`/`nbf`/`iat`) was present but not an
-    /// integer `NumericDate` (float, string, bool, null, or out of range).
+    /// A claim was present but had an invalid type or value, such as a
+    /// nonnumeric or out-of-range `NumericDate` in `exp`, `nbf`, or `iat`.
     /// Also used by [`JwtClaims::integer_claim`] for malformed custom claims.
     pub const MALFORMED_CLAIM: ErrorCode = ErrorCode(18);
     /// JWE encryption was required but missing. Not produced by the default
@@ -932,8 +932,6 @@ impl JwtConsumer<'_> {
     }
 
     fn validate_time_claims(&self, claims: &JwtClaims, errors: &mut Vec<ErrorCode>) {
-        // Read each time claim exactly once: a single map lookup per claim both
-        // classifies it (absent / malformed / integer) and yields the value.
         let exp = claims.time_claim("exp");
         let nbf = claims.time_claim("nbf");
         let iat = claims.time_claim("iat");
@@ -963,16 +961,12 @@ impl JwtConsumer<'_> {
         }
 
         let eval_time = self.evaluation_time.unwrap_or_else(SystemTime::now);
-        // Signed seconds since the epoch; negative for pre-epoch times so the
-        // claim comparisons (all in i64) work for any evaluation time.
-        let eval_secs = match eval_time.duration_since(UNIX_EPOCH) {
-            Ok(d) => d.as_secs().cast_signed(),
-            Err(e) => -e.duration().as_secs().cast_signed(),
+        let eval_nanos = match eval_time.duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_nanos().cast_signed(),
+            Err(error) => -error.duration().as_nanos().cast_signed(),
         };
-        let clock_skew_secs = self.allowed_clock_skew.as_secs().cast_signed();
+        let skew_nanos = self.allowed_clock_skew.as_nanos().cast_signed();
 
-        // A present-but-non-integer NumericDate (float, string, out-of-range)
-        // is malformed, not absent (RFC 7519 Section 2).
         for claim in [exp, nbf, iat] {
             if claim == TimeClaim::Malformed {
                 errors.push(ErrorCode::MALFORMED_CLAIM);
@@ -980,46 +974,32 @@ impl JwtConsumer<'_> {
         }
 
         // Validate expiration time
-        if let TimeClaim::Value(exp_secs) = exp {
+        if let TimeClaim::Value(exp_nanos) = exp {
             // Check if expired (token is expired at or after the exp time).
-            // Negative values are long past and thus expired; the comparison
-            // `exp + skew <= eval` handles them naturally in i64.
-            if exp_secs
-                .checked_add(clock_skew_secs)
-                .is_none_or(|e| e <= eval_secs)
-            {
+            if exp_nanos + skew_nanos <= eval_nanos {
                 errors.push(ErrorCode::EXPIRED);
             }
 
             // exp cannot precede iat (inconsistent claims)
-            if let TimeClaim::Value(iat_secs) = iat
-                && exp_secs < iat_secs
+            if let TimeClaim::Value(iat_nanos) = iat
+                && exp_nanos < iat_nanos
             {
                 errors.push(ErrorCode::EXPIRATION_BEFORE_ISSUED_AT);
             }
 
             // exp cannot precede nbf (inconsistent claims)
-            if let TimeClaim::Value(nbf_secs) = nbf
-                && exp_secs < nbf_secs
+            if let TimeClaim::Value(nbf_nanos) = nbf
+                && exp_nanos < nbf_nanos
             {
                 errors.push(ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE);
             }
 
             // Check if expiration is too far in the future
-            if let Some(max_future_validity) = self.max_future_validity {
-                let max_validity_secs = max_future_validity.as_secs().cast_signed();
-                let too_far = match eval_secs
-                    .checked_add(max_validity_secs)
-                    .and_then(|m| m.checked_add(clock_skew_secs))
-                {
-                    // exp beyond (eval + max_validity + skew) is too far.
-                    Some(max_exp) => exp_secs > max_exp,
-                    // eval+max+skew overflowed i64; only i64::MAX exp exceeds it.
-                    None => false,
-                };
-                if too_far {
-                    errors.push(ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE);
-                }
+            if let Some(max_future_validity) = self.max_future_validity
+                && exp_nanos
+                    > eval_nanos + max_future_validity.as_nanos().cast_signed() + skew_nanos
+            {
+                errors.push(ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE);
             }
         } else if self.flags.contains(ValidationFlags::REQUIRE_EXPIRATION)
             && exp == TimeClaim::Absent
@@ -1028,14 +1008,8 @@ impl JwtConsumer<'_> {
         }
 
         // Validate not before time
-        if let TimeClaim::Value(nbf_secs) = nbf {
-            // Not yet valid when nbf is after (eval + skew). Negative nbf is in
-            // the past and therefore already valid.
-            let not_yet = match eval_secs.checked_add(clock_skew_secs) {
-                Some(latest) => nbf_secs > latest,
-                None => false, // eval+skew overflowed; nothing can be after it
-            };
-            if not_yet {
+        if let TimeClaim::Value(nbf_nanos) = nbf {
+            if nbf_nanos > eval_nanos + skew_nanos {
                 errors.push(ErrorCode::NOT_YET_VALID);
             }
         } else if self.flags.contains(ValidationFlags::REQUIRE_NOT_BEFORE)
@@ -1045,27 +1019,19 @@ impl JwtConsumer<'_> {
         }
 
         // Validate issued at time
-        if let TimeClaim::Value(iat_secs) = iat {
+        if let TimeClaim::Value(iat_nanos) = iat {
             // Check if issued at is too far in the future
-            if let Some(allowed_future) = self.iat_allowed_secs_in_future {
-                let too_new = match eval_secs.checked_add(allowed_future) {
-                    Some(latest) => iat_secs > latest,
-                    None => false,
-                };
-                if too_new {
-                    errors.push(ErrorCode::ISSUED_AT_INVALID_FUTURE);
-                }
+            if let Some(allowed_future) = self.iat_allowed_secs_in_future
+                && iat_nanos > eval_nanos + i128::from(allowed_future) * NANOS_PER_SECOND
+            {
+                errors.push(ErrorCode::ISSUED_AT_INVALID_FUTURE);
             }
 
             // Check if issued at is too far in the past
-            if let Some(allowed_past) = self.iat_allowed_secs_in_past {
-                let too_old = match eval_secs.checked_sub(allowed_past) {
-                    Some(earliest) => iat_secs < earliest,
-                    None => false,
-                };
-                if too_old {
-                    errors.push(ErrorCode::ISSUED_AT_INVALID_PAST);
-                }
+            if let Some(allowed_past) = self.iat_allowed_secs_in_past
+                && iat_nanos < eval_nanos - i128::from(allowed_past) * NANOS_PER_SECOND
+            {
+                errors.push(ErrorCode::ISSUED_AT_INVALID_PAST);
             }
         } else if self.flags.contains(ValidationFlags::REQUIRE_ISSUED_AT)
             && iat == TimeClaim::Absent
@@ -1078,6 +1044,26 @@ impl JwtConsumer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_fractional_evaluation_time() {
+        let mut builder = JwtConsumerBuilder::new();
+        builder.evaluation_time = Some(UNIX_EPOCH - Duration::from_millis(500));
+        let consumer = builder.build();
+
+        assert!(
+            consumer
+                .process_to_claims(r#"{"nbf":-0.5,"exp":-0.375}"#)
+                .is_ok()
+        );
+        for (claims, code) in [
+            (r#"{"exp":-0.5}"#, ErrorCode::EXPIRED),
+            (r#"{"nbf":-0.375}"#, ErrorCode::NOT_YET_VALID),
+        ] {
+            let err = consumer.process_to_claims(claims).unwrap_err();
+            assert!(err.has_error_code(code), "{claims}: {err}");
+        }
+    }
 
     #[test]
     fn test_basic_validation_success() {

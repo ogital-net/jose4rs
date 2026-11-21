@@ -4,6 +4,12 @@
 //! to apply validation policy. The consumer does not verify JWS signatures or
 //! decrypt JWE ciphertexts. Before trusting claims, authenticate the token
 //! using the [`crate::jws`] or [`crate::jwe`] API as required by its profile.
+//!
+//! For interoperability, the [`JwtClaims`] setters for `exp`, `nbf`, and `iat`
+//! write whole seconds, discarding any subsecond part. The getters and
+//! [`JwtConsumer`] accept both integer and fractional `NumericDate` values.
+//! Fractional JSON numbers are parsed as `f64` and rounded to nanoseconds
+//! for time comparisons and getters.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +39,7 @@ const ISSUER: &str = "iss";
 const AUDIENCE: &str = "aud";
 const SUBJECT: &str = "sub";
 const JWT_ID: &str = "jti";
+const NANOS_PER_SECOND: i128 = 1_000_000_000;
 
 /// The classified result of reading a registered time claim (`exp`/`nbf`/`iat`)
 /// exactly once: one object lookup, one type check.
@@ -40,12 +47,10 @@ const JWT_ID: &str = "jti";
 pub(crate) enum TimeClaim {
     /// The claim is absent.
     Absent,
-    /// The claim is present but not an integer `NumericDate` (float, string,
-    /// bool, null, or out of `i64` range).
+    /// The claim is present but not a number in the supported seconds range.
     Malformed,
-    /// The claim is present and an integer; the value is the seconds since the
-    /// Unix epoch (may be negative).
-    Value(i64),
+    /// Signed nanoseconds since the Unix epoch.
+    Value(i128),
 }
 
 /// A single-lookup snapshot of the `aud` claim, capturing everything the
@@ -321,13 +326,11 @@ impl JwtClaims {
     ///
     /// # Returns
     ///
-    /// The expiration time as a `SystemTime` if present and non-negative,
-    /// `None` otherwise.
+    /// The expiration time as a `SystemTime`, or `None` if the claim is
+    /// missing, malformed, or outside the platform's `SystemTime` range.
     #[must_use]
     pub fn expiration_time(&self) -> Option<SystemTime> {
-        let timestamp = with_value!(self, |v| v.get_i64(EXPIRATION_TIME))?;
-        let secs = u64::try_from(timestamp).ok()?;
-        Some(UNIX_EPOCH + Duration::from_secs(secs))
+        self.time_claim_as_system_time(EXPIRATION_TIME)
     }
 
     /// Sets the expiration time (`exp`) claim.
@@ -350,13 +353,11 @@ impl JwtClaims {
     ///
     /// # Returns
     ///
-    /// The not before time as a `SystemTime` if present and non-negative,
-    /// `None` otherwise.
+    /// The not before time as a `SystemTime`, or `None` if the claim is
+    /// missing, malformed, or outside the platform's `SystemTime` range.
     #[must_use]
     pub fn not_before(&self) -> Option<SystemTime> {
-        let timestamp = with_value!(self, |v| v.get_i64(NOT_BEFORE))?;
-        let secs = u64::try_from(timestamp).ok()?;
-        Some(UNIX_EPOCH + Duration::from_secs(secs))
+        self.time_claim_as_system_time(NOT_BEFORE)
     }
 
     /// Sets the not before (`nbf`) claim.
@@ -379,13 +380,11 @@ impl JwtClaims {
     ///
     /// # Returns
     ///
-    /// The issued at time as a `SystemTime` if present and non-negative,
-    /// `None` otherwise.
+    /// The issued at time as a `SystemTime`, or `None` if the claim is
+    /// missing, malformed, or outside the platform's `SystemTime` range.
     #[must_use]
     pub fn issued_at(&self) -> Option<SystemTime> {
-        let timestamp = with_value!(self, |v| v.get_i64(ISSUED_AT))?;
-        let secs = u64::try_from(timestamp).ok()?;
-        Some(UNIX_EPOCH + Duration::from_secs(secs))
+        self.time_claim_as_system_time(ISSUED_AT)
     }
 
     /// Sets the issued at (`iat`) claim.
@@ -600,28 +599,63 @@ impl JwtClaims {
     /// not an integer in the `i64` range. JSON null and floating-point values
     /// count as malformed.
     pub fn integer_claim(&self, name: &str) -> Result<Option<i64>, InvalidJwtError> {
-        match self.time_claim(name) {
-            TimeClaim::Absent => Ok(None),
-            TimeClaim::Value(value) => Ok(Some(value)),
-            TimeClaim::Malformed => Err(InvalidJwtError::with_error_code(
-                format!("claim '{name}' must be an integer in the i64 range"),
-                ErrorCode::MALFORMED_CLAIM,
-            )),
-        }
+        with_value!(self, |v| {
+            let Some(value) = v.get(name) else {
+                return Ok(None);
+            };
+            value.as_i64().map(Some).ok_or_else(|| {
+                InvalidJwtError::with_error_code(
+                    format!("claim '{name}' must be an integer in the i64 range"),
+                    ErrorCode::MALFORMED_CLAIM,
+                )
+            })
+        })
     }
 
-    /// Classifies an integer claim (including `exp`, `nbf`, and `iat`) in a
-    /// single lookup without constructing an error.
+    /// Classifies a registered `NumericDate` claim in a single lookup.
     pub(crate) fn time_claim(&self, name: &str) -> TimeClaim {
         with_value!(self, |v| {
-            match v.get(name) {
-                None => TimeClaim::Absent,
-                Some(val) => match val.as_i64() {
-                    Some(secs) => TimeClaim::Value(secs),
-                    None => TimeClaim::Malformed,
-                },
+            let Some(value) = v.get(name) else {
+                return TimeClaim::Absent;
+            };
+            if let Some(seconds) = value.as_i64() {
+                return TimeClaim::Value(i128::from(seconds) * NANOS_PER_SECOND);
+            }
+            let Some(seconds) = value.as_f64() else {
+                return TimeClaim::Malformed;
+            };
+            let Ok(duration) = Duration::try_from_secs_f64(seconds.abs()) else {
+                return TimeClaim::Malformed;
+            };
+            let magnitude = duration.as_nanos().cast_signed();
+            let nanos = if seconds.is_sign_negative() {
+                -magnitude
+            } else {
+                magnitude
+            };
+            let min = i128::from(i64::MIN) * NANOS_PER_SECOND;
+            let end = (i128::from(i64::MAX) + 1) * NANOS_PER_SECOND;
+            if (min..end).contains(&nanos) {
+                TimeClaim::Value(nanos)
+            } else {
+                TimeClaim::Malformed
             }
         })
+    }
+
+    fn time_claim_as_system_time(&self, name: &str) -> Option<SystemTime> {
+        let TimeClaim::Value(nanos) = self.time_claim(name) else {
+            return None;
+        };
+        let magnitude = nanos.abs();
+        let seconds = u64::try_from(magnitude / NANOS_PER_SECOND).ok()?;
+        let subsec_nanos = u32::try_from(magnitude % NANOS_PER_SECOND).ok()?;
+        let duration = Duration::new(seconds, subsec_nanos);
+        if nanos < 0 {
+            UNIX_EPOCH.checked_sub(duration)
+        } else {
+            UNIX_EPOCH.checked_add(duration)
+        }
     }
 
     /// Reads the `aud` claim once and returns a full classification (presence,
@@ -1281,30 +1315,21 @@ mod tests {
 
     #[test]
     fn test_non_integer_numeric_dates() {
-        // Fractional NumericDate values are treated as malformed by time_claim()
-        // (as_i64 returns None for floats), so parsing succeeds but the claims
-        // will be flagged at validation time.
-        let json = r#"{"sub":"brian.d.campbell","nbf":1430602000.173,"iat":1430602060.5,"exp":1430602600.77}"#;
-        let claims = JwtClaims::parse(json);
+        let claims =
+            JwtClaims::parse(r#"{"nbf":-0.125,"iat":1430602060.5,"exp":1430602600.75}"#).unwrap();
 
-        if let Ok(claims) = claims {
-            assert_eq!(claims.subject(), Some("brian.d.campbell"));
-
-            if let Some(exp) = claims.expiration_time() {
-                let exp_secs = exp.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                assert!(exp_secs == 1430602600 || exp_secs == 1430602601);
-            }
-
-            if let Some(iat) = claims.issued_at() {
-                let iat_secs = iat.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                assert!(iat_secs == 1430602060 || iat_secs == 1430602061);
-            }
-
-            if let Some(nbf) = claims.not_before() {
-                let nbf_secs = nbf.duration_since(UNIX_EPOCH).unwrap().as_secs();
-                assert!(nbf_secs == 1430602000 || nbf_secs == 1430602001);
-            }
-        }
+        assert_eq!(
+            claims.expiration_time(),
+            Some(UNIX_EPOCH + Duration::new(1430602600, 750_000_000))
+        );
+        assert_eq!(
+            claims.issued_at(),
+            Some(UNIX_EPOCH + Duration::new(1430602060, 500_000_000))
+        );
+        assert_eq!(
+            claims.not_before(),
+            Some(UNIX_EPOCH - Duration::from_millis(125))
+        );
     }
 
     #[test]

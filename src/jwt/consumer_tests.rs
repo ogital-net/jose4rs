@@ -790,15 +790,13 @@ mod jwt_consumer_tests {
         assert!(err.has_error_code(ErrorCode::EXPIRED));
     }
 
-    /// A non-integer `exp`/`nbf`/`iat` (float, string, oversized)
-    /// must be rejected as malformed, not silently treated as absent.
     #[test]
-    fn non_integer_time_claims_are_malformed() {
+    fn invalid_time_claims_are_malformed() {
         for claims in [
-            r#"{"exp":1.9}"#,
             r#"{"exp":"9999999999"}"#,
             r#"{"exp":18446744073709551615}"#, // > i64::MAX
-            r#"{"nbf":1.5}"#,
+            r#"{"exp":9.223372036854776e18}"#, // 2^63 after parsing
+            r#"{"nbf":true}"#,
             r#"{"iat":"now"}"#,
         ] {
             let consumer = JwtConsumerBuilder::new()
@@ -812,6 +810,59 @@ mod jwt_consumer_tests {
                 "expected MalformedClaim for {claims}, got {:?}",
                 err.error_codes()
             );
+        }
+    }
+
+    #[test]
+    fn fractional_time_claim_boundaries() {
+        let consumer = JwtConsumerBuilder::new()
+            .set_evaluation_time_from_seconds(1000)
+            .set_allowed_clock_skew(Duration::from_millis(250))
+            .set_max_future_validity(Duration::from_millis(500))
+            .build();
+
+        assert!(consumer.process_to_claims(r#"{"exp":999.875}"#).is_ok());
+        assert!(
+            consumer
+                .process_to_claims(r#"{"nbf":1000.25,"exp":1000.75}"#)
+                .is_ok()
+        );
+
+        for (claims, code) in [
+            (r#"{"exp":999.75}"#, ErrorCode::EXPIRED),
+            (r#"{"nbf":1000.375}"#, ErrorCode::NOT_YET_VALID),
+            (
+                r#"{"exp":1000.875}"#,
+                ErrorCode::EXPIRATION_TOO_FAR_IN_FUTURE,
+            ),
+            (
+                r#"{"exp":1000.375,"iat":1000.5}"#,
+                ErrorCode::EXPIRATION_BEFORE_ISSUED_AT,
+            ),
+            (
+                r#"{"exp":1000.375,"nbf":1000.5}"#,
+                ErrorCode::EXPIRATION_BEFORE_NOT_BEFORE,
+            ),
+        ] {
+            let err = consumer.process_to_claims(claims).unwrap_err();
+            assert!(err.has_error_code(code), "{claims}: {err}");
+        }
+    }
+
+    #[test]
+    fn fractional_issued_at_restrictions() {
+        let consumer = JwtConsumerBuilder::new()
+            .set_evaluation_time_from_seconds(-1)
+            .set_issued_at_restrictions(0, 1)
+            .build();
+
+        assert!(consumer.process_to_claims(r#"{"iat":-1.5e0}"#).is_ok());
+        for (claims, code) in [
+            (r#"{"iat":-0.875}"#, ErrorCode::ISSUED_AT_INVALID_FUTURE),
+            (r#"{"iat":-2.125}"#, ErrorCode::ISSUED_AT_INVALID_PAST),
+        ] {
+            let err = consumer.process_to_claims(claims).unwrap_err();
+            assert!(err.has_error_code(code), "{claims}: {err}");
         }
     }
 
