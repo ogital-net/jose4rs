@@ -86,14 +86,14 @@ impl Curve {
     }
 
     #[allow(non_upper_case_globals)]
-    pub(super) fn from_nid(nid: std::ffi::c_int) -> Curve {
+    fn from_nid(nid: std::ffi::c_int) -> Option<Self> {
         match nid {
-            NID_X9_62_prime256v1 => Curve::P256,
-            NID_secp384r1 => Curve::P384,
-            NID_secp521r1 => Curve::P521,
+            NID_X9_62_prime256v1 => Some(Curve::P256),
+            NID_secp384r1 => Some(Curve::P384),
+            NID_secp521r1 => Some(Curve::P521),
             #[cfg(not(feature = "boring"))]
-            NID_secp256k1 => Curve::Secp256k1,
-            _ => unreachable!("invalid NID value for curve"),
+            NID_secp256k1 => Some(Curve::Secp256k1),
+            _ => None,
         }
     }
 }
@@ -236,9 +236,7 @@ impl<'a> EcKeyRef<'a> {
 
     pub(super) fn curve(&self) -> Option<Curve> {
         let group = self.get_group()?;
-        Some(Curve::from_nid(unsafe {
-            EC_GROUP_get_curve_name(group.as_ptr())
-        }))
+        Curve::from_nid(unsafe { EC_GROUP_get_curve_name(group.as_ptr()) })
     }
 
     pub(crate) fn is_private(&self) -> bool {
@@ -348,6 +346,11 @@ impl<'a> EcKeyRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unnamed_curve_is_not_supported() {
+        assert!(Curve::from_nid(0).is_none());
+    }
 
     #[test]
     fn evp_key_exposes_ec_view_only_for_ec_keys() {

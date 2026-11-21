@@ -142,6 +142,13 @@ impl KeyManagementAlgorithm {
         headers: &mut simd_json::owned::Value,
     ) -> Result<ContentEncryptionKeys, JoseError> {
         self.validate_key_algorithm(management_key, content_enc_alg)?;
+        let encrypt_oaep = |digest| match management_key {
+            JsonWebKey::Rsa(rsa_key) => rsa_key
+                .evp_pkey()
+                .rsa_encrypt(RsaPadding::Pkcs1Oaep, digest, cek)
+                .map(|encrypted_key| ContentEncryptionKeys::new(cek, encrypted_key)),
+            _ => Err(JoseError::InvalidKey("invalid key type".into())),
+        };
         match self {
             KeyManagementAlgorithm::Rsa15 => {
                 let encrypted_key = match management_key {
@@ -150,34 +157,10 @@ impl KeyManagementAlgorithm {
                 };
                 Ok(ContentEncryptionKeys::new(cek, encrypted_key))
             }
-            KeyManagementAlgorithm::RsaOaep => {
-                let encrypted_key = match management_key {
-                    JsonWebKey::Rsa(rsa_key) => rsa_key.encrypt_oaep(cek, DigestAlgorithm::Sha1),
-                    _ => return Err(JoseError::InvalidKey("invalid key type".into())),
-                };
-                Ok(ContentEncryptionKeys::new(cek, encrypted_key))
-            }
-            KeyManagementAlgorithm::RsaOaep256 => {
-                let encrypted_key = match management_key {
-                    JsonWebKey::Rsa(rsa_key) => rsa_key.encrypt_oaep(cek, DigestAlgorithm::Sha256),
-                    _ => return Err(JoseError::InvalidKey("invalid key type".into())),
-                };
-                Ok(ContentEncryptionKeys::new(cek, encrypted_key))
-            }
-            KeyManagementAlgorithm::RsaOaep384 => {
-                let encrypted_key = match management_key {
-                    JsonWebKey::Rsa(rsa_key) => rsa_key.encrypt_oaep(cek, DigestAlgorithm::Sha384),
-                    _ => return Err(JoseError::InvalidKey("invalid key type".into())),
-                };
-                Ok(ContentEncryptionKeys::new(cek, encrypted_key))
-            }
-            KeyManagementAlgorithm::RsaOaep512 => {
-                let encrypted_key = match management_key {
-                    JsonWebKey::Rsa(rsa_key) => rsa_key.encrypt_oaep(cek, DigestAlgorithm::Sha512),
-                    _ => return Err(JoseError::InvalidKey("invalid key type".into())),
-                };
-                Ok(ContentEncryptionKeys::new(cek, encrypted_key))
-            }
+            KeyManagementAlgorithm::RsaOaep => encrypt_oaep(DigestAlgorithm::Sha1),
+            KeyManagementAlgorithm::RsaOaep256 => encrypt_oaep(DigestAlgorithm::Sha256),
+            KeyManagementAlgorithm::RsaOaep384 => encrypt_oaep(DigestAlgorithm::Sha384),
+            KeyManagementAlgorithm::RsaOaep512 => encrypt_oaep(DigestAlgorithm::Sha512),
             KeyManagementAlgorithm::EcdhEs => {
                 self.ecdh_es_encrypt(management_key, content_enc_alg, cek, headers, None)
             }

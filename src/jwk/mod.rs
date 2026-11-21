@@ -432,24 +432,7 @@ impl JsonWebKey {
             },
         };
 
-        match evp_pkey.key_type() {
-            EvpPkeyType::Rsa => Ok(JsonWebKey::Rsa(RsaJsonWebKey::from_evp_pkey(evp_pkey))),
-            EvpPkeyType::RsaPss => Ok(JsonWebKey::Rsa(RsaJsonWebKey::from_evp_pkey(evp_pkey))),
-            EvpPkeyType::Ec => Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::from_evp_pkey(
-                evp_pkey,
-            ))),
-            EvpPkeyType::Ed25519 => Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_evp_pkey(
-                evp_pkey,
-            ))),
-            EvpPkeyType::X25519 => Ok(JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_evp_pkey(
-                evp_pkey,
-            ))),
-            #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
-            EvpPkeyType::MlDsa44 | EvpPkeyType::MlDsa65 | EvpPkeyType::MlDsa87 => {
-                Ok(JsonWebKey::MlDsa(MlDsaJsonWebKey::from_evp_pkey(evp_pkey)))
-            }
-            _ => Err(JoseError::InvalidKey("unsupported key type".into())),
-        }
+        Self::from_evp_pkey(evp_pkey)
     }
 
     fn from_evp_pkey(evp_pkey: EvpPkey) -> Result<Self, JoseError> {
@@ -457,9 +440,7 @@ impl JsonWebKey {
             EvpPkeyType::Rsa | EvpPkeyType::RsaPss => {
                 Ok(JsonWebKey::Rsa(RsaJsonWebKey::from_evp_pkey(evp_pkey)))
             }
-            EvpPkeyType::Ec => Ok(JsonWebKey::EllipticCurve(EcJsonWebKey::from_evp_pkey(
-                evp_pkey,
-            ))),
+            EvpPkeyType::Ec => EcJsonWebKey::from_evp_pkey(evp_pkey).map(JsonWebKey::EllipticCurve),
             EvpPkeyType::Ed25519 | EvpPkeyType::X25519 => Ok(JsonWebKey::OctetKeyPair(
                 OkpJsonWebKey::from_evp_pkey(evp_pkey),
             )),

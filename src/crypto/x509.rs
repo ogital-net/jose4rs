@@ -19,15 +19,13 @@ pub(crate) struct X509Cert(ptr::NonNull<X509>);
 impl X509Cert {
     /// Parses an X.509 certificate from its DER encoding.
     pub(crate) fn from_der(der: &[u8]) -> Result<Self, JoseError> {
+        let len = der
+            .len()
+            .try_into()
+            .map_err(|_| JoseError::InvalidKey("X.509 certificate DER is too large".into()))?;
         // d2i_X509() advances the input pointer, so use a local copy.
         let mut ptr = der.as_ptr();
-        let x509 = unsafe {
-            d2i_X509(
-                ptr::null_mut(),
-                &raw mut ptr,
-                der.len().try_into().expect("slice too large"),
-            )
-        };
+        let x509 = unsafe { d2i_X509(ptr::null_mut(), &raw mut ptr, len) };
         ptr::NonNull::new(x509)
             .map(Self)
             .ok_or_else(|| JoseError::InvalidKey("invalid X.509 certificate DER".into()))

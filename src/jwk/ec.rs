@@ -53,15 +53,11 @@ impl EcJsonWebKey {
         }
     }
 
-    pub(super) fn from_evp_pkey(evp_pkey: EvpPkey) -> Self {
-        Self {
-            evp_pkey,
-            alg: None,
-            key_use: None,
-            key_id: None,
-            x5t: None,
-            x5t_s256: None,
+    pub(super) fn from_evp_pkey(evp_pkey: EvpPkey) -> Result<Self, JoseError> {
+        if evp_pkey.get_ec_curve().is_none() {
+            return Err(JoseError::InvalidKey("unsupported EC curve".into()));
         }
+        Ok(Self::new(evp_pkey, None))
     }
 
     /// The key ID (`kid`), if set.
@@ -198,7 +194,7 @@ impl EcJsonWebKey {
                 "certificate public key is not an EC key".into(),
             ));
         }
-        let mut jwk = Self::from_evp_pkey(pkey);
+        let mut jwk = Self::from_evp_pkey(pkey)?;
         jwk.x5t = Some(cert.thumbprint(crate::crypto::DigestAlgorithm::Sha1)?);
         jwk.x5t_s256 = Some(cert.thumbprint(crate::crypto::DigestAlgorithm::Sha256)?);
         Ok(jwk)

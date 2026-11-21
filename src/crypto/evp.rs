@@ -283,7 +283,9 @@ impl EvpPkey {
                 return param_id.try_into().unwrap_or(EvpPkeyType::None);
             }
         }
-        unsafe { EVP_PKEY_id(self.as_ptr()) }.try_into().unwrap()
+        unsafe { EVP_PKEY_id(self.as_ptr()) }
+            .try_into()
+            .unwrap_or(EvpPkeyType::None)
     }
 
     fn key_size_bytes(&self) -> usize {
@@ -548,14 +550,12 @@ impl EvpPkey {
 
     /// Parses a private key from DER, auto-detecting PKCS#8 and legacy formats.
     pub(crate) fn from_private_key_der(der: &[u8]) -> Result<Self, JoseError> {
+        let len = der
+            .len()
+            .try_into()
+            .map_err(|_| JoseError::InvalidKey("private key DER is too large".into()))?;
         let mut inp = der.as_ptr();
-        let pkey = unsafe {
-            d2i_AutoPrivateKey(
-                ptr::null_mut(),
-                &raw mut inp,
-                der.len().try_into().expect("slice too large"),
-            )
-        };
+        let pkey = unsafe { d2i_AutoPrivateKey(ptr::null_mut(), &raw mut inp, len) };
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid private key DER".into()));
         }
@@ -564,14 +564,12 @@ impl EvpPkey {
 
     /// Parses a public key from SPKI DER.
     pub(crate) fn from_public_key_der(der: &[u8]) -> Result<Self, JoseError> {
+        let len = der
+            .len()
+            .try_into()
+            .map_err(|_| JoseError::InvalidKey("public key DER is too large".into()))?;
         let mut inp = der.as_ptr();
-        let pkey = unsafe {
-            d2i_PUBKEY(
-                ptr::null_mut(),
-                &raw mut inp,
-                der.len().try_into().expect("slice too large"),
-            )
-        };
+        let pkey = unsafe { d2i_PUBKEY(ptr::null_mut(), &raw mut inp, len) };
         if pkey.is_null() {
             return Err(JoseError::InvalidKey("invalid public key DER".into()));
         }
@@ -697,38 +695,33 @@ impl EvpPkey {
         encrypt: bool,
         padding: RsaPadding,
         digest_alg: digest::Algorithm,
-    ) -> EvpPkeyCtx {
-        let mut pctx = EvpPkeyCtx::from_key(self);
-        unsafe {
+    ) -> Result<EvpPkeyCtx, JoseError> {
+        let mut pctx = EvpPkeyCtx::try_from_key(self)?;
+        let initialized = unsafe {
             if encrypt {
-                assert!(
-                    1 == EVP_PKEY_encrypt_init(pctx.as_mut_ptr()),
-                    "EVP_PKEY_encrypt_init() failed"
-                );
+                EVP_PKEY_encrypt_init(pctx.as_mut_ptr())
             } else {
-                assert!(
-                    1 == EVP_PKEY_decrypt_init(pctx.as_mut_ptr()),
-                    "EVP_PKEY_decrypt_init() failed"
-                );
+                EVP_PKEY_decrypt_init(pctx.as_mut_ptr())
             }
-            assert!(
-                1 == EVP_PKEY_CTX_set_rsa_padding(pctx.as_mut_ptr(), padding.into()),
-                "EVP_PKEY_CTX_set_rsa_padding() failed"
-            );
+        };
+        if initialized != 1
+            || 1 != unsafe { EVP_PKEY_CTX_set_rsa_padding(pctx.as_mut_ptr(), padding.into()) }
+        {
+            return Err(JoseError::InvalidKey(
+                "key cannot be used for the requested RSA encryption or decryption".into(),
+            ));
         }
-        if padding == RsaPadding::Pkcs1Oaep {
-            unsafe {
-                assert!(
-                    1 == EVP_PKEY_CTX_set_rsa_oaep_md(pctx.as_mut_ptr(), digest_alg.as_ptr()),
-                    "EVP_PKEY_CTX_set_rsa_oaep_md() failed"
-                );
-                assert!(
-                    1 == EVP_PKEY_CTX_set_rsa_mgf1_md(pctx.as_mut_ptr(), digest_alg.as_ptr()),
-                    "EVP_PKEY_CTX_set_rsa_mgf1_md() failed"
-                );
+        if padding == RsaPadding::Pkcs1Oaep
+            && unsafe {
+                1 != EVP_PKEY_CTX_set_rsa_oaep_md(pctx.as_mut_ptr(), digest_alg.as_ptr())
+                    || 1 != EVP_PKEY_CTX_set_rsa_mgf1_md(pctx.as_mut_ptr(), digest_alg.as_ptr())
             }
+        {
+            return Err(JoseError::InvalidKey(
+                "key cannot be used with the requested RSA-OAEP parameters".into(),
+            ));
         }
-        pctx
+        Ok(pctx)
     }
 
     pub(crate) fn rsa_encrypt(
@@ -736,41 +729,42 @@ impl EvpPkey {
         padding: RsaPadding,
         digest_alg: digest::Algorithm,
         plaintext: &[u8],
-    ) -> Box<[u8]> {
-        let mut pctx = self.rsaes_init(true, padding, digest_alg);
+    ) -> Result<Box<[u8]>, JoseError> {
+        let mut pctx = self.rsaes_init(true, padding, digest_alg)?;
 
         // Determine the maximum length of the ciphertext.
         let mut out_len = 0;
-        assert!(
-            1 == unsafe {
-                EVP_PKEY_encrypt(
-                    pctx.as_mut_ptr(),
-                    ptr::null_mut(),
-                    &raw mut out_len,
-                    plaintext.as_ptr(),
-                    plaintext.len(),
-                )
-            },
-            "EVP_PKEY_encrypt() failed"
-        );
-
-        let mut ciphertext = Vec::with_capacity(out_len);
-        assert!(
-            1 == unsafe {
-                EVP_PKEY_encrypt(
-                    pctx.as_mut_ptr(),
-                    ciphertext.as_mut_ptr(),
-                    &raw mut out_len,
-                    plaintext.as_ptr(),
-                    plaintext.len(),
-                )
-            },
-            "EVP_PKEY_encrypt() failed"
-        );
-        unsafe {
-            ciphertext.set_len(out_len);
+        if 1 != unsafe {
+            EVP_PKEY_encrypt(
+                pctx.as_mut_ptr(),
+                ptr::null_mut(),
+                &raw mut out_len,
+                plaintext.as_ptr(),
+                plaintext.len(),
+            )
+        } {
+            return Err(JoseError::InvalidKey(
+                "could not size RSA ciphertext".into(),
+            ));
         }
-        ciphertext.into_boxed_slice()
+
+        let mut ciphertext = vec![0; out_len];
+        let ret = unsafe {
+            EVP_PKEY_encrypt(
+                pctx.as_mut_ptr(),
+                ciphertext.as_mut_ptr(),
+                &raw mut out_len,
+                plaintext.as_ptr(),
+                plaintext.len(),
+            )
+        };
+        if ret != 1 || out_len > ciphertext.len() {
+            return Err(JoseError::InvalidKey(
+                "RSA encryption failed for the supplied key and plaintext".into(),
+            ));
+        }
+        ciphertext.truncate(out_len);
+        Ok(ciphertext.into_boxed_slice())
     }
 
     pub(crate) fn rsa_decrypt(
@@ -779,22 +773,23 @@ impl EvpPkey {
         digest_alg: digest::Algorithm,
         ciphertext: &[u8],
     ) -> Result<mem::ZeroizingVec, JoseError> {
-        let mut pctx = self.rsaes_init(false, padding, digest_alg);
+        let mut pctx = self.rsaes_init(false, padding, digest_alg)?;
 
         // Determine the maximum length of the plaintext.
         let mut out_len = 0;
-        assert!(
-            1 == unsafe {
-                EVP_PKEY_decrypt(
-                    pctx.as_mut_ptr(),
-                    ptr::null_mut(),
-                    &raw mut out_len,
-                    ciphertext.as_ptr(),
-                    ciphertext.len(),
-                )
-            },
-            "EVP_PKEY_decrypt() failed"
-        );
+        if 1 != unsafe {
+            EVP_PKEY_decrypt(
+                pctx.as_mut_ptr(),
+                ptr::null_mut(),
+                &raw mut out_len,
+                ciphertext.as_ptr(),
+                ciphertext.len(),
+            )
+        } {
+            return Err(JoseError::IntegrityError(
+                "asymmetric decryption failed".into(),
+            ));
+        }
 
         let mut plaintext = mem::ZeroizingVec::new(vec![0; out_len]);
         let ret = unsafe {
@@ -856,10 +851,16 @@ impl EvpPkeyCtx {
     }
 
     fn from_key(key: &EvpPkey) -> Self {
+        Self::try_from_key(key).expect("EVP_PKEY_CTX_new() failed")
+    }
+
+    fn try_from_key(key: &EvpPkey) -> Result<Self, JoseError> {
         // EVP_PKEY_CTX_new() increments the reference count of the key
         // so we dont need to specify a lifetime for the EvpPkey reference
         let ptr = unsafe { EVP_PKEY_CTX_new(key.0.as_ptr(), ptr::null_mut()) };
-        Self(ptr::NonNull::new(ptr).expect("EVP_PKEY_CTX_new() failed"))
+        ptr::NonNull::new(ptr)
+            .map(Self)
+            .ok_or_else(|| JoseError::InvalidKey("could not initialize key operation".into()))
     }
 
     fn as_mut_ptr(&mut self) -> *mut EVP_PKEY_CTX {
@@ -972,6 +973,16 @@ mod tests {
         let key = EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &[1; 32]).unwrap();
         let peer = EvpPkey::new_raw_public_key(EvpPkeyType::X25519, &[0; 32]).unwrap();
         assert!(matches!(key.derive(&peer), Err(JoseError::InvalidKey(_))));
+    }
+
+    #[test]
+    fn test_rsa_oaep_rejects_oversized_plaintext() {
+        let key = EvpPkey::generate_rsa(2048);
+        let plaintext = vec![0; key.key_size_bytes()];
+        assert!(matches!(
+            key.rsa_encrypt(RsaPadding::Pkcs1Oaep, digest::Algorithm::Sha256, &plaintext),
+            Err(JoseError::InvalidKey(_))
+        ));
     }
 
     #[test]
@@ -1179,7 +1190,7 @@ FjsRvi0CAwEAAQ==
             (RsaPadding::Pkcs1Oaep, digest::Algorithm::Sha512),
         ] {
             let plain = rand_bytes(64);
-            let ciphertext = evp.rsa_encrypt(padding, md, &plain);
+            let ciphertext = evp.rsa_encrypt(padding, md, &plain).unwrap();
             let out = evp.rsa_decrypt(padding, md, &ciphertext).unwrap();
             assert_eq!(&*plain, out.as_slice());
             assert!(out.capacity() >= ciphertext.len());

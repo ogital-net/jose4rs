@@ -432,10 +432,14 @@ impl RsaJsonWebKey {
     }
 
     /// Encrypts with RSAES-PKCS1-v1_5 (JWE `RSA1_5` key management).
+    ///
+    /// # Panics
+    /// Panics if the key or plaintext is unsuitable for the requested encryption.
     #[must_use]
     pub fn encrypt_pcks1_1_5(&self, plaintext: &[u8]) -> Box<[u8]> {
         self.evp_pkey
             .rsa_encrypt(RsaPadding::Pkcs1, DigestAlgorithm::Sha1, plaintext)
+            .expect("RSA encryption failed")
     }
 
     /// Decrypts with RSAES-PKCS1-v1_5 (JWE `RSA1_5` key management).
@@ -449,10 +453,14 @@ impl RsaJsonWebKey {
     }
 
     /// Encrypts with RSAES-OAEP using the given digest (JWE `RSA-OAEP*` key management).
+    ///
+    /// # Panics
+    /// Panics if the key or plaintext is unsuitable for the requested encryption.
     #[must_use]
     pub fn encrypt_oaep(&self, plaintext: &[u8], digest_alg: DigestAlgorithm) -> Box<[u8]> {
         self.evp_pkey
             .rsa_encrypt(RsaPadding::Pkcs1Oaep, digest_alg, plaintext)
+            .expect("RSA encryption failed")
     }
 
     /// Decrypts with RSAES-OAEP using the given digest (JWE `RSA-OAEP*` key management).
