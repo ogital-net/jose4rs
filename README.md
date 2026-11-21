@@ -2,22 +2,35 @@
 
 A Rust implementation of the JOSE standards — JWS ([RFC 7515]), JWE ([RFC 7516]), JWK ([RFC 7517]), and JWT ([RFC 7519]) — ported from the Java [jose4j] library. Also implements [RFC 7797] (unencoded/detached JWS payloads), JWK thumbprints ([RFC 7638]), and JWK thumbprint URIs ([RFC 9278]).
 
-[RFC 7515]: https://tools.ietf.org/html/rfc7515
-[RFC 7516]: https://tools.ietf.org/html/rfc7516
-[RFC 7517]: https://tools.ietf.org/html/rfc7517
-[RFC 7519]: https://tools.ietf.org/html/rfc7519
-[RFC 7797]: https://tools.ietf.org/html/rfc7797
-[RFC 7638]: https://tools.ietf.org/html/rfc7638
+[RFC 7515]: https://www.rfc-editor.org/rfc/rfc7515
+[RFC 7516]: https://www.rfc-editor.org/rfc/rfc7516
+[RFC 7517]: https://www.rfc-editor.org/rfc/rfc7517
+[RFC 7519]: https://www.rfc-editor.org/rfc/rfc7519
+[RFC 7797]: https://www.rfc-editor.org/rfc/rfc7797
+[RFC 7638]: https://www.rfc-editor.org/rfc/rfc7638
 [RFC 9278]: https://www.rfc-editor.org/rfc/rfc9278
 [RFC 9864]: https://www.rfc-editor.org/rfc/rfc9864
-[RFC 9964]: https://tools.ietf.org/html/rfc9964
+[RFC 9964]: https://www.rfc-editor.org/rfc/rfc9964
 [jose4j]: https://bitbucket.org/b_c/jose4j
+
+## Installation
+
+```toml
+[dependencies]
+jose4rs = "0.8"
+```
 
 ## Status
 
-Early release (0.7.x): the API may still change between minor versions, but the implementation is complete for the standards listed below and is covered by an extensive test suite, including the jose4j test vectors.
+The API is pre-1.0 and may change between minor releases. Supported algorithms and serializations are listed below.
 
-This crate contains **no cryptographic primitives of its own**. All cryptography is delegated to [aws-lc-rs] (default) or [BoringSSL] — both widely deployed, independently maintained libraries — selected by feature flag. The crate itself has not undergone an independent security audit; the code under audit would be the parsing, validation, and key-handling logic, not the crypto.
+Cryptographic primitives come from [AWS-LC] (default, via `aws-lc-sys`) or [BoringSSL] (via `boring-sys`). jose4rs handles JOSE parsing, validation, key handling, and the composition of those primitives. The crate itself has not undergone an independent security audit.
+
+### Upgrading from 0.7
+
+- `AlgorithmIdentifier`, `KeyManagementAlgorithm`, and `ContentEncryptionAlgorithm` are now `#[non_exhaustive]`. Downstream matches need a wildcard arm; reject unknown algorithms when matching for policy enforcement.
+- The `Algorithm` trait is sealed. Downstream implementations are no longer supported; use the built-in algorithm types with `AlgorithmConstraints`.
+- `Ed25519` is now a distinct JWS algorithm identifier. Existing `EdDSA` tokens still work with Ed25519 keys, but allowlists and explicit JWK `alg` values must match the identifier in use. Allow both labels only when interoperability requires both.
 
 ## What is implemented
 
@@ -28,47 +41,45 @@ This crate contains **no cryptographic primitives of its own**. All cryptography
 | HMAC | HS256, HS384, HS512 |
 | RSA | RS256, RS384, RS512 |
 | RSA-PSS | PS256, PS384, PS512 |
-| ECDSA | ES256, ES384, ES512, ES256K (secp256k1) |
+| ECDSA | ES256, ES384, ES512; ES256K (secp256k1, AWS-LC only) |
 | EdDSA | `Ed25519` ([RFC 9864]), `EdDSA` (legacy, Ed25519 keys only) |
-| ML-DSA (optional) | ML-DSA-44, ML-DSA-65, ML-DSA-87 |
+| ML-DSA (`pq-ml-dsa`, AWS-LC only) | ML-DSA-44, ML-DSA-65, ML-DSA-87 |
 | Unsecured | `none` (blocked by default) |
 
 Prefer `Ed25519` for new deployments. Both identifiers use the same signature operation, but algorithm allowlists and a JWK's `alg` restriction distinguish them.
 
 The general (multi-signature) JSON serialization and unprotected headers are **not** supported.
 
-**JWE** — compact serialization; all registered key management and content encryption algorithms:
+**JWE** — compact serialization; supported algorithms:
 
 | Category | Algorithms |
 |----------|------------|
-| Key management | RSA1_5, RSA-OAEP, RSA-OAEP-256/384/512, ECDH-ES, ECDH-ES+A128/192/256KW, A128/192/256KW, A128/192/256GCMKW, PBES2-HS256/384/512+A128/192/256KW, `dir` |
-| Content encryption | A128/192/256CBC-HS256/384/512, A128/192/256GCM, C20P, XC20P |
+| Key management | RSA1_5, RSA-OAEP, RSA-OAEP-256, RSA-OAEP-384, RSA-OAEP-512, ECDH-ES, ECDH-ES+A128KW, ECDH-ES+A192KW, ECDH-ES+A256KW, A128KW, A192KW, A256KW, A128GCMKW, A192GCMKW, A256GCMKW, PBES2-HS256+A128KW, PBES2-HS384+A192KW, PBES2-HS512+A256KW, `dir` |
+| Content encryption | A128CBC-HS256, A192CBC-HS384, A256CBC-HS512, A128GCM, A192GCM, A256GCM, C20P, XC20P |
 
 C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its extended-nonce variant), included for jose4j interoperability. The JWE JSON serialization is **not** supported. RSA1_5 and the PBES2 algorithms are blocked by default. The `zip` (DEFLATE compression) header is supported behind the optional `zip` feature (see below).
 
-**JWK** - `RSA`, `EC`, `OKP`, and `oct` keys, plus optional `AKP` keys for ML-DSA; JSON and PEM/PKCS#8/SPKI/DER import/export; thumbprints (RFC 7638 and [RFC 9964]); key generation via `JsonWebKeyGenerator`; key sets with kid-based lookup. EC curves: P-256, P-384, P-521, secp256k1. OKP curves: Ed25519, X25519. Ed448 and X448 are **not** supported (not provided by the crypto backends).
+**JWK** — `RSA`, `EC`, `OKP`, and `oct` keys, plus optional `AKP` keys for ML-DSA. Includes JSON import/export, key generation via `JsonWebKeyGenerator`, JWK Sets with key-ID lookup, and thumbprints and thumbprint URIs ([RFC 7638], [RFC 9278], and [RFC 9964]). Asymmetric keys support PEM and DER (PKCS#8 private keys and SPKI public keys, plus import of legacy PKCS#1 and SEC1 private keys); `oct` keys use JWK JSON. Supported curves: P-256, P-384, P-521, secp256k1 (AWS-LC only), Ed25519, and X25519. Ed448 and X448 are not supported. X.509 helpers extract public keys from certificates; they do not validate certificate chains.
 
-**JWT** — claims construction/parsing and a validating consumer modeled on jose4j's `JwtConsumer`: issuer/audience/subject validation, temporal validation (`exp`, `nbf`, `iat`) with configurable clock skew, required-claim enforcement, prohibited claims, and max-future-validity. Nested JWT (JWS inside JWE) is supported.
+**JWT** — claims construction, parsing, and validation modeled on jose4j's `JwtConsumer`: issuer, audience, subject, and time checks (`exp`, `nbf`, `iat`), configurable clock skew, required and prohibited claims, and custom validators. `JwtConsumer` validates claims only; it does not verify signatures or decrypt tokens. Authenticate the token with the JWS or JWE API before trusting its claims. For a nested JWT (JWS inside JWE), decrypt the outer JWE, then verify the inner JWS before validating the claims.
 
-**JWKS over HTTPS** (optional) — a caching `HttpsJwks` fetcher with `Cache-Control`/`Expires` handling and refresh-on-miss. A configurable 60-second minimum cache duration prevents strict response directives from causing a fetch per token verification; key-ID misses still refresh immediately. Bring your own HTTP transport: the blocking trait is under `jwks-https`, the async trait under `jwks-https-async`. Neither pulls in an HTTP client or async runtime.
+**JWKS over HTTPS** (optional) — `HttpsJwks` and `AsyncHttpsJwks` cache keys using `Cache-Control`, `Expires`, and `Age`. By default, even responses with `no-store` or `no-cache` are reused for at least 60 seconds; set the minimum to zero to honor those directives without the floor. A key-ID miss can trigger an early refresh, subject to a 10-second cooldown. Stale-on-error reuse is opt-in. The application supplies the HTTP transport and configures a trusted endpoint; the crate does not select an issuer or endpoint from token headers.
 
 ## Design properties
 
-- **Minimal allocation on hot paths.** Parsed JOSE parts are referenced by offset into a single owned buffer rather than copied. SIMD base64 (`base64-simd`) and `simd-json` are used by default.
-- **No panics on attacker-controlled input.** Malformed tokens and keys return `JoseError`; panics are reserved for internal invariants.
-- **No in-tree crypto.** All cryptographic operations go through the selected backend; the public API is identical for both.
-- **Algorithm constraints.** jose4j-style allow/block lists for `alg` and `enc` headers, applied at parse/decrypt/verify time. Weak algorithms (RSA1_5, PBES2, `none`) are blocked unless explicitly permitted.
-- **Extensible algorithm enums.** Downstream matches on `AlgorithmIdentifier`, `KeyManagementAlgorithm`, and `ContentEncryptionAlgorithm` need a wildcard arm so new algorithms can be added without breaking exhaustive matches.
+- **Low-allocation hot paths.** Compact JWS and JWE parsing read directly from the input and keep token parts in a single owned buffer rather than allocating separately for each part. SIMD base64 (`base64-simd`) and `simd-json` are used by default.
+- **Algorithm constraints.** Use `AlgorithmConstraints` with `ConstraintType::Permit` to pin allowed `alg` values and, for JWE, allowed `enc` values. Choose the policy from trusted application configuration, not from the token. Default constraints block `none` for JWS and RSA1_5 and PBES2 for JWE.
+- **Key selection.** Use `VerificationJwkSelector::select_unique` or the cached `select_unique_verification_key` methods to reject ambiguous matches and mismatched explicit JWK `alg` values. Selection does not verify the signature or establish trust in the JWKS.
 
-[aws-lc-rs]: https://crates.io/crates/aws-lc-rs
+[AWS-LC]: https://github.com/aws/aws-lc
 [BoringSSL]: https://github.com/google/boringssl
 
 ## Features
 
 | Feature | Effect |
 |---------|--------|
-| `aws-lc` (default) | aws-lc-rs cryptography backend. Mutually exclusive with `boring`. |
-| `boring` | BoringSSL cryptography backend. Mutually exclusive with `aws-lc`. |
+| `aws-lc` (default) | AWS-LC cryptography backend via `aws-lc-sys`. |
+| `boring` | BoringSSL cryptography backend via `boring-sys`. |
 | `base64-simd` (default) | SIMD-accelerated base64. |
 | `base64` | Portable (non-SIMD) base64 fallback. |
 | `pq-ml-dsa` | ML-DSA signatures and AKP JWKs ([RFC 9964]); implies `aws-lc`. |
@@ -76,15 +87,20 @@ C20P and XC20P are non-standard jose4j extensions (ChaCha20-Poly1305 and its ext
 | `jwks-https-async` | Async HTTPS JWKS fetching; implies `jwks-https`. |
 | `zip` | DEFLATE (`zip: DEF`, RFC 1951) compression of the JWE plaintext, via `flate2`. |
 
-Exactly one cryptography backend must be enabled; selecting both or neither is a compile error.
-
-### `zip` backend selection
-
-The `zip` feature enables `flate2`'s pure-Rust `miniz_oxide` backend (safe, no C compiler needed). To use a faster or zlib-compatible backend, depend on `flate2` in your own crate with the desired feature — Cargo unifies it onto the same `flate2` build:
+Enable exactly one cryptography backend and at least one base64 feature. `--all-features` is not a valid combination because it enables both crypto backends. For BoringSSL:
 
 ```toml
 [dependencies]
-jose4rs = { version = "0.7", features = ["zip"] }
+jose4rs = { version = "0.8", default-features = false, features = ["boring", "base64-simd"] }
+```
+
+### `zip` backend selection
+
+The `zip` feature uses `flate2` with its pure-Rust `miniz_oxide` backend. To select a different compression backend, enable the corresponding `flate2` feature in your own crate; Cargo unifies the features:
+
+```toml
+[dependencies]
+jose4rs = { version = "0.8", features = ["zip"] }
 flate2 = { version = "1", features = ["zlib-rs"] }  # or "zlib-ng", "zlib", ...
 ```
 
@@ -92,40 +108,50 @@ Decompression is capped (default 200 KiB, matching jose4j's `decompress-max-byte
 
 ## Performance
 
-The crate includes Criterion benchmarks comparing against `jsonwebtoken`, `josekit`, and `biscuit` for JWT validate/sign round trips (HS256, RS256, ES256), and against `josekit` for JWE (A128KW, RSA-OAEP). jose4rs is consistently the fastest in these comparisons — typically by a wide margin on JWT validation, owing to the low-allocation parse path and SIMD base64/JSON. Run them yourself:
+The Criterion benchmarks compare JWT verification and claims validation (HS256, RS256, ES256) with `jsonwebtoken`, `josekit`, and `biscuit`, and selected JWE operations with `josekit`. Results depend on the hardware, backend, token size, and validation policy.
 
 ```sh
-cargo bench
+cargo bench --bench jwt_comparison --bench jwe_comparison
 ```
-
-As a rough indication from runs on an Apple M-series laptop: validating an HS256 JWT (signature + all registered claims) takes about 4 µs, and RS256 about 90 µs. Absolute numbers depend on hardware and token size; the relative ordering against the other crates is stable across runs.
 
 ## Testing
 
-255 unit tests plus integration tests, including the jose4j JWE test-vector suite and allocation-profiling tests (`dhat`). Line coverage is approximately 90%. Run with:
+The suite includes unit and integration tests, the jose4j JWE test vectors, and allocation-profiling tests using `dhat`. Test the crypto backends separately:
 
 ```sh
 cargo test
-cargo llvm-cov   # coverage
+cargo test --features pq-ml-dsa,zip,jwks-https-async
+cargo test --no-default-features --features boring,base64-simd,zip,jwks-https-async
 ```
+
+With `cargo-llvm-cov` installed, use `cargo llvm-cov` in place of `cargo test` to measure Rust coverage, including the FFI wrappers. This does not measure coverage inside the native crypto libraries.
 
 ## Example
 
-Verify a JWS and read its payload:
+Verify a compact JWS using ES256 and a public key obtained from a trusted source:
 
 ```rust
-use jose4rs::jws::JsonWebSignature;
+use jose4rs::error::JoseError;
+use jose4rs::jwa::{AlgorithmConstraints, ConstraintType};
 use jose4rs::jwk::JsonWebKey;
+use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
+use jose4rs::jwx::JsonWebStructure;
 
-# let compact = "eyJhbGc...";
-# let key_json = r#"{"kty":"oct","k":"..."}"#;
-let key = JsonWebKey::from_json(key_json)?;
-let mut jws = JsonWebSignature::from_compact_serialization(compact)?;
-let payload = jws.payload(&key)?; // verifies the signature first
-# Ok::<(), jose4rs::error::JoseError>(())
+fn verify_es256(compact: &str, trusted_jwk_json: &str) -> Result<Vec<u8>, JoseError> {
+	let key = JsonWebKey::from_json(trusted_jwk_json)?;
+	let constraints = AlgorithmConstraints::new(
+		ConstraintType::Permit,
+		[AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256],
+	);
+	let mut jws = JsonWebSignature::new();
+	jws.set_algorithm_constraints(&constraints);
+	jws.set_compact_serialization(compact)?;
+	let payload = jws.payload(&key)?; // verifies the signature before returning bytes
+	Ok(payload.to_vec())
+}
 ```
 
-See the [examples](examples/) directory for JWE round trips, nested JWT, JWKS fetching, PEM/X.509 key handling, and a two-pass JWT consumer. Most are direct ports of jose4j's `ExamplesTest`.
+For runnable walkthroughs, see the [JWT round trip](examples/jwt_round_trip.rs), [JWS verification with a trusted JWKS](examples/jwks_verify_jws.rs), [nested JWT](examples/nested_jwt_round_trip.rs), and [PEM/X.509 key handling](examples/pem_x509_keys.rs). The [examples directory](examples/) also includes blocking and async HTTPS JWKS fetching.
 
 ## License
 

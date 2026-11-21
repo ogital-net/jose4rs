@@ -1,3 +1,8 @@
+//! Shared JOSE header parameters and operations for JWS and JWE.
+//!
+//! Import [`JsonWebStructure`] to use common methods such as setting algorithm
+//! constraints and parsing compact input on JWS and JWE objects.
+
 use crate::{error::JoseError, jwa::AlgorithmConstraints};
 use simd_json::{
     base::{ValueAsArray as _, ValueAsScalar as _},

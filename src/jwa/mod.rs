@@ -1,3 +1,9 @@
+//! JOSE algorithm constraints for JWS and JWE.
+//!
+//! Use [`AlgorithmConstraints`] with [`ConstraintType::Permit`] to allow only
+//! algorithms selected by trusted application policy. The [`Algorithm`] trait
+//! is sealed; use the built-in JOSE algorithm identifier types.
+
 use std::{fmt::Display, sync::LazyLock};
 
 use crate::{error::JoseError, jwe::KeyManagementAlgorithm, jws::AlgorithmIdentifier};

@@ -4,10 +4,10 @@
 //! (RFC 7516), [JWK] (RFC 7517), and [JWT] (RFC 7519) -- ported from the Java
 //! [jose4j] library.
 //!
-//! [JWS]: https://tools.ietf.org/html/rfc7515
-//! [JWE]: https://tools.ietf.org/html/rfc7516
-//! [JWK]: https://tools.ietf.org/html/rfc7517
-//! [JWT]: https://tools.ietf.org/html/rfc7519
+//! [JWS]: https://www.rfc-editor.org/rfc/rfc7515
+//! [JWE]: https://www.rfc-editor.org/rfc/rfc7516
+//! [JWK]: https://www.rfc-editor.org/rfc/rfc7517
+//! [JWT]: https://www.rfc-editor.org/rfc/rfc7519
 //! [jose4j]: https://bitbucket.org/b_c/jose4j
 //!
 //! ## Modules
@@ -20,49 +20,63 @@
 //! - [`jwx`] -- shared JOSE header parameters and structure traits.
 //! - [`error`] -- the crate's error type.
 //!
-//! ## Design goals
+//! ## Verification and validation
 //!
-//! - **Minimal allocations** on the hot parse/verify/decrypt paths. Decoded
-//!   JOSE parts are referenced by offset into a single owned buffer rather
-//!   than copied.
-//! - **No panics on attacker-controlled input.** Malformed tokens and keys
-//!   return [`error::JoseError`]; panics are reserved for internal invariants.
-//! - **Backend flexibility.** Cryptography is provided by [aws-lc-rs] (default)
-//!   or [BoringSSL], selected by feature flag. ML-DSA is currently available
-//!   only with AWS-LC.
+//! Parsing does not authenticate a token. Choose keys and permitted algorithms
+//! from trusted application configuration. Verify a JWS or decrypt a JWE as
+//! required by the token's profile before passing its claims to
+//! [`jwt::JwtConsumer`], which validates claims but does not authenticate tokens.
 //!
-//! [aws-lc-rs]: https://crates.io/crates/aws-lc-rs
+//! Compact JWS and JWE parsing store token parts in a single owned buffer.
+//! Cryptographic primitives come from [AWS-LC] via `aws-lc-sys` (default) or
+//! [BoringSSL] via `boring-sys`. jose4rs itself has not undergone an independent
+//! security audit.
+//!
+//! [AWS-LC]: https://github.com/aws/aws-lc
 //! [BoringSSL]: https://github.com/google/boringssl
 //!
 //! ## Features
 //!
 //! | Feature | Effect |
 //! |---------|--------|
-//! | `aws-lc` (default) | Use the aws-lc-rs cryptography backend. Mutually exclusive with `boring`. |
-//! | `boring` | Use the `BoringSSL` cryptography backend. Mutually exclusive with `aws-lc`. |
+//! | `aws-lc` (default) | AWS-LC cryptography backend. Required for ES256K (secp256k1). |
+//! | `boring` | BoringSSL cryptography backend. |
 //! | `base64-simd` (default) | SIMD-accelerated base64. |
 //! | `base64` | Portable (non-SIMD) base64 fallback. |
 //! | `pq-ml-dsa` | ML-DSA signatures and AKP JWKs (RFC 9964); implies `aws-lc`. |
 //! | `jwks-https` | Blocking HTTPS JWKS fetching (bring your own transport). |
 //! | `jwks-https-async` | Async HTTPS JWKS fetching; implies `jwks-https`. |
+//! | `zip` | DEFLATE (`zip: DEF`) compression for JWE. |
 //!
-//! Exactly one cryptography backend (`aws-lc` or `boring`) must be enabled;
-//! selecting both or neither is a compile error.
+//! Enable exactly one cryptography backend and at least one base64 feature.
+//! To use BoringSSL, disable default features and enable `boring` and either
+//! `base64-simd` or `base64`. `--all-features` is not supported because it
+//! enables both cryptography backends.
 //!
 //! ## Example
 //!
-//! Verify a JWS and read its payload:
+//! Sign a compact JWS, then verify it using the public key and an ES256-only
+//! policy. In an application, obtain the verification key from a trusted source.
 //!
-//! ```no_run
-//! use jose4rs::jws::JsonWebSignature;
-//! use jose4rs::jwk::JsonWebKey;
-//! # use jose4rs::jwx::JsonWebStructure;
+//! ```
+//! use jose4rs::jwa::{AlgorithmConstraints, ConstraintType};
+//! use jose4rs::jwk::JsonWebKeyGenerator;
+//! use jose4rs::jws::{AlgorithmIdentifier, JsonWebSignature};
+//! use jose4rs::jwx::JsonWebStructure;
 //!
-//! # let compact = "eyJhbGc...";
-//! # let key_json = r#"{"kty":"oct","k":"..."}"#;
-//! let key = JsonWebKey::from_json(key_json)?;
-//! let mut jws = JsonWebSignature::from_compact_serialization(compact)?;
-//! let payload = jws.payload(&key)?; // verifies the signature first
+//! let alg = AlgorithmIdentifier::EcdsaUsingP256CurveAndSha256;
+//! let signing_key = JsonWebKeyGenerator::for_signature(alg).generate()?;
+//! let mut signer = JsonWebSignature::new();
+//! signer.set_algorithm(alg);
+//! signer.set_payload(b"hello JOSE");
+//! let compact = signer.compact_serialization(&signing_key)?;
+//! let public_key = signing_key.into_public()?;
+//!
+//! let constraints = AlgorithmConstraints::new(ConstraintType::Permit, [alg]);
+//! let mut verifier = JsonWebSignature::new();
+//! verifier.set_algorithm_constraints(&constraints);
+//! verifier.set_compact_serialization(&compact)?;
+//! assert_eq!(verifier.payload(&public_key)?, b"hello JOSE");
 //! # Ok::<(), jose4rs::error::JoseError>(())
 //! ```
 
@@ -72,9 +86,6 @@
 // conversions), where the casts are intentional and SAFETY-documented.
 #![warn(clippy::pedantic, unreachable_pub)]
 #![allow(
-    // FFI-driven numeric/pointer casts in `src/crypto`; values are bounded by
-    // the underlying C API contracts.
-    //clippy::cast_possible_wrap,
     // Stylistic preferences we don't enforce.
     clippy::similar_names,
     clippy::many_single_char_names,
@@ -109,17 +120,11 @@ mod base64;
 mod crypto;
 /// The crate error type, [`error::JoseError`].
 pub mod error;
-/// JOSE algorithms: identifiers and algorithm-constraint enforcement.
 pub mod jwa;
-/// JSON Web Encryption (JWE, RFC 7516) creation and decryption.
 pub mod jwe;
-/// JSON Web Keys (JWK, RFC 7517) and key sets (JWKS).
 pub mod jwk;
-/// JSON Web Signature (JWS, RFC 7515) creation and verification.
 pub mod jws;
-/// JSON Web Token (JWT, RFC 7519) claims and a validating consumer.
 pub mod jwt;
-/// Shared JOSE header parameters and the common structure trait.
 pub mod jwx;
 
 /// An index pair into a per-struct backing buffer, used to reference decoded

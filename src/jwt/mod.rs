@@ -1,7 +1,9 @@
-//! JWT (JSON Web Token) Claims handling.
+//! JSON Web Token claims ([RFC 7519](https://www.rfc-editor.org/rfc/rfc7519)).
 //!
-//! This module provides types and methods for working with JWT claims as defined in
-//! [RFC 7519](https://tools.ietf.org/html/rfc7519).
+//! Use [`JwtClaims`] to construct or parse a claims set, and [`JwtConsumer`]
+//! to apply validation policy. The consumer does not verify JWS signatures or
+//! decrypt JWE ciphertexts. Before trusting claims, authenticate the token
+//! using the [`crate::jws`] or [`crate::jwe`] API as required by its profile.
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

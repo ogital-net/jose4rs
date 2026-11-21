@@ -1,3 +1,12 @@
+//! JSON Web Keys and JWK Sets ([RFC 7517](https://www.rfc-editor.org/rfc/rfc7517)).
+//!
+//! [`JsonWebKey`] supports key import, export, and thumbprints;
+//! [`JsonWebKeyGenerator`] generates keys for supported algorithms.
+//! [`VerificationJwkSelector::select_unique`] finds a unique candidate in a
+//! trusted [`JsonWebKeySet`]. Key selection does not verify a signature or
+//! establish trust in the key set. Optional HTTPS caching is available through
+//! `jwks-https` and `jwks-https-async` with an application-supplied transport.
+
 use std::collections::BTreeMap;
 
 use ec::EcJsonWebKey;

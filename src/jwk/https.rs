@@ -1,18 +1,15 @@
 //! Fetching and caching a JWKS from an HTTPS endpoint.
 //!
-//! Mirrors jose4j's `HttpsJwks`. The crate owns the parts that are easy to get
-//! wrong -- response-cache directive handling, refresh single-flighting, and
-//! retain-stale-on-error -- while the actual HTTP transport is supplied by the
-//! caller via the [`JwksFetcher`] trait. This keeps the library free of a
-//! hard-coded HTTP client and free of any async runtime; async users bridge
-//! their client (or enable the `jwks-https-async` feature for a native async
-//! trait).
+//! [`HttpsJwks`] handles caching and refresh coordination. Configure it with a
+//! trusted JWKS URL and supply a [`JwksFetcher`] that handles HTTPS, TLS,
+//! redirects, and HTTP status codes. For async transports, enable
+//! `jwks-https-async`.
 //!
-//! Server freshness policy is parsed according to RFC 9111 section 4.2,
-//! including `Cache-Control`, `Expires`, and `Age`. By default, the cache then
-//! applies [`DEFAULT_MINIMUM_CACHE_DURATION`] as a JOSE-specific availability
-//! safeguard so strict directives cannot cause a fetch per token verification.
-//! Set the minimum to zero to use the server policy without that floor.
+//! The cache uses `Cache-Control`, `Expires`, and `Age` for freshness, subject
+//! to [`DEFAULT_MINIMUM_CACHE_DURATION`] by default. Set the minimum to zero
+//! to honor server directives such as `no-store` without that floor. A key-ID
+//! miss can trigger an early refresh, subject to [`KID_MISS_REFRESH_COOLDOWN`].
+//! Serving stale keys after a failed refresh is opt-in.
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
@@ -28,8 +25,9 @@ pub const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(3600);
 /// the response requests immediate revalidation or no storage.
 ///
 /// JWKS documents contain public keys, and fetching once per token would make
-/// verification dependent on endpoint availability and request volume. A
-/// `kid` miss and [`HttpsJwks::refresh`] still force an immediate refresh.
+/// verification dependent on endpoint availability and request volume.
+/// [`HttpsJwks::refresh`] bypasses the floor, as can a `kid` miss when the
+/// cooldown has elapsed.
 pub const DEFAULT_MINIMUM_CACHE_DURATION: Duration = Duration::from_secs(60);
 
 /// Minimum interval between refresh attempts, to avoid a thundering herd when

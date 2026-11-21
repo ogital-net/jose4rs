@@ -1,10 +1,16 @@
 //! JSON Web Signature (JWS) implementation.
 //!
-//! This module provides support for creating and verifying JSON Web Signatures
-//! as defined in [RFC 7515](https://tools.ietf.org/html/rfc7515).
+//! Supports compact and flattened JSON serialization ([RFC 7515]) and detached
+//! or unencoded payloads ([RFC 7797]). General (multi-signature) JSON
+//! serialization and unprotected headers are not supported.
 //!
-//! JWS represents digitally signed or MACed content using JSON data structures.
-//! It supports both compact serialization (URL-safe) and JSON serialization formats.
+//! Parsing does not authenticate the payload. Apply an algorithm allowlist
+//! and use [`JsonWebSignature::payload`] to verify and read the payload with a
+//! trusted key. `Ed25519` and legacy `EdDSA` are distinct algorithm identifiers
+//! for allowlists even though both use Ed25519 keys here.
+//!
+//! [RFC 7515]: https://www.rfc-editor.org/rfc/rfc7515
+//! [RFC 7797]: https://www.rfc-editor.org/rfc/rfc7797
 
 mod algorithm_identifier;
 

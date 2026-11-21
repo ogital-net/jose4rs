@@ -1,15 +1,13 @@
-//! Async JWKS fetching for async runtimes (e.g. tokio).
+//! Async JWKS fetching and caching.
 //!
-//! Enabled by the `jwks-https-async` feature. Provides a native-async
-//! counterpart to the blocking [`JwksFetcher`](super::JwksFetcher) so async
-//! applications don't have to bridge a blocking call into their runtime. The
-//! cache-directive handling is identical to [`HttpsJwks`](super::HttpsJwks);
-//! only the transport is async.
+//! Enabled by `jwks-https-async`. [`AsyncHttpsJwks`] uses the same cache policy
+//! as the blocking [`HttpsJwks`](super::HttpsJwks). Supply a trusted JWKS URL
+//! and implement [`AsyncJwksFetcher`] with your HTTP client. The transport is
+//! responsible for HTTPS, TLS, redirects, and HTTP status codes.
 //!
-//! The cache lock is a plain `std::sync::RwLock` held only for the brief
-//! read/write of the in-memory snapshot -- never across an `.await` -- so this
-//! stays runtime-agnostic (no tokio dependency) and safe to use from any
-//! executor.
+//! The in-memory cache lock is never held across an `.await`; a separate async
+//! lock coordinates refreshes. The cache does not require a particular async
+//! runtime.
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};

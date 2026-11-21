@@ -1,3 +1,14 @@
+//! JSON Web Encryption ([RFC 7516](https://www.rfc-editor.org/rfc/rfc7516)).
+//!
+//! [`JsonWebEncryption`] supports compact serialization, not JWE JSON
+//! serialization. Key management (`alg`) and content encryption (`enc`) have
+//! separate algorithm constraints. The optional `zip` feature enables DEFLATE
+//! compression with a configurable decompressed size limit.
+//!
+//! Parsing does not authenticate or decrypt the ciphertext. Use
+//! [`JsonWebEncryption::payload`] with the management key to authenticate and
+//! decrypt it. If the payload is a nested JWS, verify that signature separately.
+
 mod aes_hmac;
 #[cfg(feature = "zip")]
 mod compression;
