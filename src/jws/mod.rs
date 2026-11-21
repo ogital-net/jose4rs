@@ -70,6 +70,9 @@ fn header_b64_flag(header: &simd_json::owned::Value) -> Result<bool, JoseError> 
 /// The structure maintains the signature, payload, and protected header, and provides
 /// methods for signing and verification.
 ///
+/// Editing a protected header or replacing the payload invalidates the parsed
+/// signature. Serialize with a signing key to produce a new signature.
+///
 /// # Formats
 ///
 /// - **Compact Serialization**: URL-safe format suitable for HTTP headers
@@ -782,6 +785,8 @@ impl<'a> JsonWebSignature<'a> {
     /// `b64` to `crit`. Call before serializing. Use together with
     /// [`set_detached_payload`](Self::set_detached_payload) to omit the payload
     /// from the serialization (the ACME POST pattern).
+    /// A parsed JWS already has its `b64` setting; calling this method
+    /// invalidates its signature.
     pub fn set_b64(&mut self, b64: bool) {
         self.payload_is_b64 = b64;
         if b64 {
@@ -791,6 +796,7 @@ impl<'a> JsonWebSignature<'a> {
                 let _ = header.remove("b64");
                 let _ = header.remove("crit");
             }
+            self.invalidate_signature();
         } else {
             self.set_header_value("b64", simd_json::owned::Value::from(false));
             // crit must list b64.
@@ -807,6 +813,11 @@ impl<'a> JsonWebSignature<'a> {
     /// inside the JWS.
     pub fn set_detached_payload(&mut self, payload: impl AsRef<[u8]>) {
         self.detached_payload = Some(payload.as_ref().to_vec());
+    }
+
+    fn invalidate_signature(&mut self) {
+        self.verification_input = None;
+        self.signature = None;
     }
 
     /// Builds the signing input for a `b64=false` JWS:
@@ -1323,8 +1334,7 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
         let start = self.buffer.len();
         self.buffer.extend_from_slice(payload.as_ref());
         self.payload = Some(BufferRef::new(start, self.buffer.len()));
-        self.verification_input = None;
-        self.signature = None;
+        self.invalidate_signature();
         self.detached_payload = None;
     }
 
@@ -1336,6 +1346,7 @@ impl<'a> JsonWebStructure<'a, AlgorithmIdentifier> for JsonWebSignature<'a> {
             header.insert(name.into(), value).unwrap();
             self.header = Some(header);
         }
+        self.invalidate_signature();
     }
 
     fn header_name(&self, name: impl AsRef<str>) -> Option<&str> {
@@ -1653,11 +1664,15 @@ mod tests {
 
         // Verify: parse, re-attach the payload, then verify.
         let mut parsed = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
-        parsed.set_b64(false); // parse records b64=false from the header already
+        assert!(!parsed.is_payload_base64url_encoded());
         parsed.set_detached_payload(b"$.02");
         assert!(parsed.verify_signature(&key).unwrap());
         assert_eq!(parsed.unverified_payload().unwrap(), b"$.02");
         assert_eq!(parsed.payload(&key).unwrap(), b"$.02");
+
+        parsed.set_b64(true);
+        assert!(parsed.signature.is_none());
+        assert!(parsed.verification_input.is_none());
 
         // A tampered payload must fail.
         let mut bad = JsonWebSignature::from_flattened_json_serialization(&json).unwrap();
@@ -1691,6 +1706,28 @@ mod tests {
         assert!(parsed.verify_signature(&key).unwrap());
         assert_eq!(parsed.payload(&key).unwrap(), b"signed-message");
         assert_eq!(parsed.unverified_payload().unwrap(), b"signed-message");
+    }
+
+    #[test]
+    fn test_editing_protected_header_requires_resigning() {
+        let key = JsonWebKeyGenerator::for_signature(AlgorithmIdentifier::HmacSha256)
+            .generate()
+            .unwrap();
+        let mut signer = JsonWebSignature::new();
+        signer.set_algorithm(AlgorithmIdentifier::HmacSha256);
+        signer.set_payload(b"message");
+        let compact = signer.compact_serialization(&key).unwrap();
+        let mut parsed = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+
+        parsed.set_header_value("typ", "example+jws".into());
+        assert!(parsed.signature.is_none());
+        assert!(parsed.verification_input.is_none());
+        assert_eq!(parsed.unverified_payload().unwrap(), b"message");
+
+        let compact = parsed.compact_serialization(&key).unwrap();
+        let resigned = JsonWebSignature::from_compact_serialization(&compact).unwrap();
+        assert_eq!(resigned.header_name("typ"), Some("example+jws"));
+        assert_eq!(resigned.payload(&key).unwrap(), b"message");
     }
 
     #[test]
