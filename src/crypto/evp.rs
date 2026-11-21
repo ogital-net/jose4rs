@@ -933,6 +933,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_raw_public_key_equality_compares_key_material() {
+        let key_type = EvpPkeyType::Ed25519;
+        let first = EvpPkey::new_raw_public_key(key_type, &[2; 32]).unwrap();
+        let same = EvpPkey::new_raw_public_key(key_type, &[2; 32]).unwrap();
+        let different = EvpPkey::new_raw_public_key(key_type, &[3; 32]).unwrap();
+
+        assert!(first == same);
+        assert!(first != different);
+    }
+
+    #[test]
+    fn test_raw_key_import_rejects_wrong_length() {
+        for key_type in [EvpPkeyType::Ed25519, EvpPkeyType::X25519] {
+            for key in [&[0; 31][..], &[0; 33][..]] {
+                assert!(matches!(
+                    EvpPkey::new_raw_private_key(key_type, key),
+                    Err(JoseError::InvalidKey(_))
+                ));
+                assert!(matches!(
+                    EvpPkey::new_raw_public_key(key_type, key),
+                    Err(JoseError::InvalidKey(_))
+                ));
+            }
+        }
+    }
+
+    #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    #[test]
+    fn test_ml_dsa_raw_public_key_rejects_wrong_length() {
+        let params = crate::jwk::ml_dsa::MlDsaParameterSet::MlDsa44;
+        assert!(matches!(
+            EvpPkey::new_pqdsa_raw_public_key(params, &[0; 32]),
+            Err(JoseError::InvalidKey(_))
+        ));
+    }
+
+    #[test]
+    fn test_x25519_rejects_all_zero_peer() {
+        let key = EvpPkey::new_raw_private_key(EvpPkeyType::X25519, &[1; 32]).unwrap();
+        let peer = EvpPkey::new_raw_public_key(EvpPkeyType::X25519, &[0; 32]).unwrap();
+        assert!(matches!(key.derive(&peer), Err(JoseError::InvalidKey(_))));
+    }
+
+    #[test]
+    fn test_rsa_oaep_returns_integrity_error_for_invalid_ciphertext() {
+        let key = EvpPkey::generate_rsa(2048);
+        let ciphertext = vec![0; key.key_size_bytes()];
+        assert!(matches!(
+            key.rsa_decrypt(
+                RsaPadding::Pkcs1Oaep,
+                digest::Algorithm::Sha256,
+                &ciphertext
+            ),
+            Err(JoseError::IntegrityError(_))
+        ));
+    }
+
+    #[test]
     fn test_rsa_pss_signing_uses_digest_length_salt() {
         let key = EvpPkey::generate_rsa(2048);
         let rsa = key.rsa().unwrap();

@@ -249,6 +249,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_digest_context_clone_copies_partial_state() {
+        let alg = Algorithm::Sha256;
+        let mut original = EvpMd::init(alg);
+        original.update(b"prefix");
+        let mut cloned = EvpMd {
+            ctx: original.ctx.clone(),
+        };
+
+        original.update(b"-original");
+        cloned.update(b"-clone");
+
+        assert_eq!(original.finish(), digest(alg, b"prefix-original"));
+        assert_eq!(cloned.finish(), digest(alg, b"prefix-clone"));
+    }
+
     /// Known-answer tests pinning exact digest bytes so a future refactor that
     /// swaps or breaks an algorithm dispatch is caught immediately. Vectors are
     /// the FIPS 180-4 examples: the empty string and "abc".

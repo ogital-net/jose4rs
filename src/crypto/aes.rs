@@ -188,9 +188,12 @@ mod tests {
     }
 
     #[test]
-    fn test_unwrap_key_rejects_wrong_iv() {
+    fn test_wrap_unwrap_key_with_explicit_iv() {
         let aes_key = [0u8; 16];
-        let wrapped = wrap_key(&aes_key, None, &[0u8; 16]).unwrap();
+        let iv = [2u8; 8];
+        let key = [3u8; 16];
+        let wrapped = wrap_key(&aes_key, Some(&iv), &key).unwrap();
+        assert_eq!(*unwrap_key(&aes_key, Some(&iv), &wrapped).unwrap(), key);
         assert!(matches!(
             unwrap_key(&aes_key, Some(&[1u8; 8]), &wrapped),
             Err(JoseError::IntegrityError(_))

@@ -166,3 +166,28 @@ fn get_raw_bytes(
     buf.truncate(written);
     Ok(buf.into_boxed_slice())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_seed_import_cleanses_input_and_owns_key() {
+        let params = MlDsaParameterSet::MlDsa44;
+        let mut seed = [0xA7; MlDsaParameterSet::SEED_LEN];
+        let key = MlDsaKey::from_seed(params, &mut seed).unwrap();
+
+        assert_eq!(seed, [0; MlDsaParameterSet::SEED_LEN]);
+        assert_eq!(key.raw_public_key().unwrap().len(), params.public_key_len());
+        drop(key);
+    }
+
+    #[test]
+    fn test_seed_import_rejects_wrong_length() {
+        let mut seed = [0; MlDsaParameterSet::SEED_LEN - 1];
+        assert!(matches!(
+            MlDsaKey::from_seed(MlDsaParameterSet::MlDsa44, &mut seed),
+            Err(JoseError::InvalidKey(_))
+        ));
+    }
+}

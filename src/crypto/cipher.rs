@@ -249,6 +249,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_cbc_rejects_invalid_buffer_sizes() {
+        let mut ctx = EvpCipherCtx::init();
+        let algorithm = Algorithm::Aes128Cbc;
+        let key = [0; 16];
+        let iv = [0; 16];
+        assert!(ctx.encrypt(algorithm, &key, &iv, &mut Vec::new()).is_err());
+        assert!(ctx.decrypt(algorithm, &key, &iv, &mut []).is_err());
+
+        for (key, iv) in [(&key[..15], &iv[..]), (&key[..], &iv[..15])] {
+            let mut buffer = vec![0; 16];
+            assert!(matches!(
+                ctx.encrypt(algorithm, key, iv, &mut buffer),
+                Err(JoseError::InvalidKey(_))
+            ));
+            assert!(matches!(
+                ctx.decrypt(algorithm, key, iv, &mut buffer),
+                Err(JoseError::InvalidKey(_))
+            ));
+        }
+        assert!(matches!(
+            ctx.decrypt(algorithm, &key, &iv, &mut [0; 15]),
+            Err(JoseError::InvalidKey(_))
+        ));
+    }
+
+    #[test]
+    fn test_cbc_rejects_missing_padding_block() {
+        let mut ctx = EvpCipherCtx::init();
+        let algorithm = Algorithm::Aes128Cbc;
+        let key = [0; 16];
+        let iv = [0; 16];
+        let mut ciphertext = vec![0; 16];
+        ctx.encrypt(algorithm, &key, &iv, &mut ciphertext).unwrap();
+        assert_eq!(ciphertext.len(), 32);
+        ciphertext.truncate(16);
+        assert!(matches!(
+            ctx.decrypt(algorithm, &key, &iv, &mut ciphertext),
+            Err(JoseError::InvalidKey(_))
+        ));
+    }
+
+    #[test]
     fn test_iv_len() {
         for alg in [
             Algorithm::Aes128Cbc,
