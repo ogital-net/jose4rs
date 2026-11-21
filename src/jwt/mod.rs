@@ -41,8 +41,7 @@ const SUBJECT: &str = "sub";
 const JWT_ID: &str = "jti";
 const NANOS_PER_SECOND: i128 = 1_000_000_000;
 
-/// The classified result of reading a registered time claim (`exp`/`nbf`/`iat`)
-/// exactly once: one object lookup, one type check.
+/// The classified result of reading a `NumericDate` claim.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TimeClaim {
     /// The claim is absent.
@@ -150,6 +149,10 @@ impl ClaimsInner {
 /// Represents the claims set of a JSON Web Token, providing convenient access
 /// to registered claims (as defined in RFC 7519 Section 4.1) as well as the
 /// ability to store custom claims.
+///
+/// Use [`Self::set_json_claim`] to add a structured claim, such as a nested
+/// object or an array of objects. Use [`Self::parse`] to load a complete JSON
+/// claims object.
 ///
 /// # Registered Claims
 ///
@@ -331,6 +334,8 @@ impl JwtClaims {
     #[must_use]
     pub fn expiration_time(&self) -> Option<SystemTime> {
         self.time_claim_as_system_time(EXPIRATION_TIME)
+            .ok()
+            .flatten()
     }
 
     /// Sets the expiration time (`exp`) claim.
@@ -357,7 +362,7 @@ impl JwtClaims {
     /// missing, malformed, or outside the platform's `SystemTime` range.
     #[must_use]
     pub fn not_before(&self) -> Option<SystemTime> {
-        self.time_claim_as_system_time(NOT_BEFORE)
+        self.time_claim_as_system_time(NOT_BEFORE).ok().flatten()
     }
 
     /// Sets the not before (`nbf`) claim.
@@ -384,7 +389,7 @@ impl JwtClaims {
     /// missing, malformed, or outside the platform's `SystemTime` range.
     #[must_use]
     pub fn issued_at(&self) -> Option<SystemTime> {
-        self.time_claim_as_system_time(ISSUED_AT)
+        self.time_claim_as_system_time(ISSUED_AT).ok().flatten()
     }
 
     /// Sets the issued at (`iat`) claim.
@@ -483,11 +488,49 @@ impl JwtClaims {
         name: impl AsRef<str>,
         value: impl AsRef<str>,
     ) -> Result<(), JoseError> {
-        self.inner
-            .as_owned_mut()
-            .insert(name.as_ref(), value.as_ref())
-            .map(|_| ())
-            .map_err(|_| JoseError::InvalidJson("claims value is not a JSON object".into()))
+        self.insert_claim(name.as_ref(), value.as_ref())
+    }
+
+    /// Sets or replaces a named claim with a signed 64-bit JSON integer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the claims value is not a JSON object.
+    pub fn set_integer_claim(
+        &mut self,
+        name: impl AsRef<str>,
+        value: i64,
+    ) -> Result<(), JoseError> {
+        self.insert_claim(name.as_ref(), value)
+    }
+
+    /// Sets or replaces a named claim with a JSON boolean.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the claims value is not a JSON object.
+    pub fn set_boolean_claim(
+        &mut self,
+        name: impl AsRef<str>,
+        value: bool,
+    ) -> Result<(), JoseError> {
+        self.insert_claim(name.as_ref(), value)
+    }
+
+    /// Sets or replaces a named claim with a finite floating-point JSON number.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JoseError::InvalidJson`] if `value` is NaN or infinite, or if
+    /// the claims value is not a JSON object.
+    pub fn set_float_claim(&mut self, name: impl AsRef<str>, value: f64) -> Result<(), JoseError> {
+        let name = name.as_ref();
+        if !value.is_finite() {
+            return Err(JoseError::InvalidJson(format!(
+                "claim '{name}' must be a finite JSON number"
+            )));
+        }
+        self.insert_claim(name, value)
     }
 
     /// Gets a custom (or any) claim as a vector of strings.
@@ -554,9 +597,45 @@ impl JwtClaims {
         values: &[impl AsRef<str>],
     ) -> Result<(), JoseError> {
         let arr: Vec<simd_json::OwnedValue> = values.iter().map(|s| s.as_ref().into()).collect();
+        self.insert_claim(name.as_ref(), arr)
+    }
+
+    /// Sets or replaces a named claim with a single serialized JSON value.
+    ///
+    /// Accepts any JSON value, including objects, arrays, and `null`. JSON
+    /// `null` stores a present claim; it does not remove the claim.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`JoseError::InvalidJson`] if `json` cannot be parsed as a single
+    /// JSON value. Invalid input leaves the claims unchanged.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use jose4rs::jwt::JwtClaims;
+    /// let mut claims = JwtClaims::new();
+    /// claims.set_json_claim("address", r#"{"country":"DE"}"#).unwrap();
+    /// assert!(claims.has_claim("address"));
+    /// ```
+    pub fn set_json_claim(
+        &mut self,
+        name: impl AsRef<str>,
+        json: impl AsRef<[u8]>,
+    ) -> Result<(), JoseError> {
+        let mut buf = json.as_ref().to_vec();
+        let value = simd_json::to_owned_value(&mut buf).map_err(JoseError::json)?;
+        self.insert_claim(name.as_ref(), value)
+    }
+
+    fn insert_claim(
+        &mut self,
+        name: &str,
+        value: impl Into<simd_json::OwnedValue>,
+    ) -> Result<(), JoseError> {
         self.inner
             .as_owned_mut()
-            .insert(name.as_ref(), arr)
+            .insert(name, value)
             .map(|_| ())
             .map_err(|_| JoseError::InvalidJson("claims value is not a JSON object".into()))
     }
@@ -603,17 +682,71 @@ impl JwtClaims {
             let Some(value) = v.get(name) else {
                 return Ok(None);
             };
-            value.as_i64().map(Some).ok_or_else(|| {
-                InvalidJwtError::with_error_code(
-                    format!("claim '{name}' must be an integer in the i64 range"),
-                    ErrorCode::MALFORMED_CLAIM,
-                )
-            })
+            value
+                .as_i64()
+                .map(Some)
+                .ok_or_else(|| Self::malformed_claim(name, "an integer in the i64 range"))
         })
     }
 
-    /// Classifies a registered `NumericDate` claim in a single lookup.
-    pub(crate) fn time_claim(&self, name: &str) -> TimeClaim {
+    /// Reads a named `NumericDate` claim, such as `auth_time` in OIDC.
+    ///
+    /// Accepts integer and fractional Unix seconds, including times before the
+    /// epoch. Fractional values are rounded to nanoseconds. Returns `Ok(None)`
+    /// only if the claim is absent. This does not validate the claim's meaning
+    /// or apply protocol policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::MALFORMED_CLAIM`] if the claim is present but is not
+    /// a supported `NumericDate` or is outside the platform's `SystemTime` range.
+    pub fn time_claim(&self, name: &str) -> Result<Option<SystemTime>, InvalidJwtError> {
+        self.time_claim_as_system_time(name)
+            .map_err(|()| Self::malformed_claim(name, "a representable NumericDate"))
+    }
+
+    /// Reads a named JSON number as a finite `f64`.
+    ///
+    /// Accepts integers as well as floating-point values. Large integers can
+    /// lose precision when converted. Returns `Ok(None)` only if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::MALFORMED_CLAIM`] for present values that are not
+    /// finite numbers, including null and numeric strings.
+    pub fn float_claim(&self, name: &str) -> Result<Option<f64>, InvalidJwtError> {
+        with_value!(self, |v| v
+            .get(name)
+            .map(|value| value
+                .cast_f64()
+                .filter(|number| number.is_finite())
+                .ok_or_else(|| Self::malformed_claim(name, "a finite JSON number")))
+            .transpose())
+    }
+
+    /// Reads a named JSON boolean. Returns `Ok(None)` only if absent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ErrorCode::MALFORMED_CLAIM`] if the claim is present but is not
+    /// a boolean. Null, strings, and numbers are not coerced to booleans.
+    pub fn boolean_claim(&self, name: &str) -> Result<Option<bool>, InvalidJwtError> {
+        with_value!(self, |v| v
+            .get(name)
+            .map(|value| value
+                .as_bool()
+                .ok_or_else(|| Self::malformed_claim(name, "a JSON boolean")))
+            .transpose())
+    }
+
+    fn malformed_claim(name: &str, expected: &str) -> InvalidJwtError {
+        InvalidJwtError::with_error_code(
+            format!("claim '{name}' must be {expected}"),
+            ErrorCode::MALFORMED_CLAIM,
+        )
+    }
+
+    pub(crate) fn classify_time_claim(&self, name: &str) -> TimeClaim {
         with_value!(self, |v| {
             let Some(value) = v.get(name) else {
                 return TimeClaim::Absent;
@@ -643,19 +776,22 @@ impl JwtClaims {
         })
     }
 
-    fn time_claim_as_system_time(&self, name: &str) -> Option<SystemTime> {
-        let TimeClaim::Value(nanos) = self.time_claim(name) else {
-            return None;
+    fn time_claim_as_system_time(&self, name: &str) -> Result<Option<SystemTime>, ()> {
+        let nanos = match self.classify_time_claim(name) {
+            TimeClaim::Absent => return Ok(None),
+            TimeClaim::Malformed => return Err(()),
+            TimeClaim::Value(nanos) => nanos,
         };
         let magnitude = nanos.abs();
-        let seconds = u64::try_from(magnitude / NANOS_PER_SECOND).ok()?;
-        let subsec_nanos = u32::try_from(magnitude % NANOS_PER_SECOND).ok()?;
+        let seconds = u64::try_from(magnitude / NANOS_PER_SECOND).map_err(|_| ())?;
+        let subsec_nanos = u32::try_from(magnitude % NANOS_PER_SECOND).map_err(|_| ())?;
         let duration = Duration::new(seconds, subsec_nanos);
-        if nanos < 0 {
+        let time = if nanos < 0 {
             UNIX_EPOCH.checked_sub(duration)
         } else {
             UNIX_EPOCH.checked_add(duration)
-        }
+        };
+        time.map(Some).ok_or(())
     }
 
     /// Reads the `aud` claim once and returns a full classification (presence,
@@ -803,6 +939,57 @@ mod tests {
     }
 
     #[test]
+    fn test_time_claim_distinguishes_absent_and_malformed() {
+        let claims = JwtClaims::parse(
+            br#"{"auth_time":123,"iat":123.25,"negative":-0.25,"null":null,"string":"123","too_large":9223372036854775808}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            claims.time_claim("auth_time").unwrap(),
+            Some(UNIX_EPOCH + Duration::from_secs(123))
+        );
+        assert_eq!(
+            claims.time_claim("iat").unwrap(),
+            Some(UNIX_EPOCH + Duration::from_millis(123_250))
+        );
+        assert_eq!(claims.time_claim("iat").unwrap(), claims.issued_at());
+        assert_eq!(
+            claims.time_claim("negative").unwrap(),
+            Some(UNIX_EPOCH - Duration::from_millis(250))
+        );
+        assert_eq!(claims.time_claim("missing").unwrap(), None);
+        for name in ["null", "string", "too_large"] {
+            let error = claims.time_claim(name).unwrap_err();
+            assert!(error.has_error_code(ErrorCode::MALFORMED_CLAIM), "{name}");
+        }
+    }
+
+    #[test]
+    fn test_float_and_boolean_claims_distinguish_absent_and_malformed() {
+        let claims = JwtClaims::parse(
+            br#"{"score":1.25,"count":-3,"email_verified":true,"phone_number_verified":false,"null":null,"string":"1.25"}"#,
+        )
+        .unwrap();
+        assert_eq!(claims.float_claim("score").unwrap(), Some(1.25));
+        assert_eq!(claims.float_claim("count").unwrap(), Some(-3.0));
+        assert_eq!(claims.float_claim("missing").unwrap(), None);
+        assert_eq!(claims.boolean_claim("email_verified").unwrap(), Some(true));
+        assert_eq!(
+            claims.boolean_claim("phone_number_verified").unwrap(),
+            Some(false)
+        );
+        assert_eq!(claims.boolean_claim("missing").unwrap(), None);
+        for name in ["null", "string", "email_verified"] {
+            let error = claims.float_claim(name).unwrap_err();
+            assert!(error.has_error_code(ErrorCode::MALFORMED_CLAIM), "{name}");
+        }
+        for name in ["null", "string", "count"] {
+            let error = claims.boolean_claim(name).unwrap_err();
+            assert!(error.has_error_code(ErrorCode::MALFORMED_CLAIM), "{name}");
+        }
+    }
+
+    #[test]
     fn test_set_string_claim() {
         let mut claims = JwtClaims::new();
         claims
@@ -819,6 +1006,69 @@ mod tests {
         assert!(json.contains(r#""email":"new@example.com""#));
         let parsed = JwtClaims::parse(&json).unwrap();
         assert_eq!(parsed.string_claim("email"), Some("new@example.com"));
+    }
+
+    #[test]
+    fn test_set_scalar_claims_round_trip() {
+        for mut claims in [
+            JwtClaims::new(),
+            JwtClaims::parse(r#"{"auth_time":"old"}"#).unwrap(),
+        ] {
+            claims.set_integer_claim("auth_time", 123).unwrap();
+            claims.set_boolean_claim("email_verified", false).unwrap();
+            claims.set_float_claim("score", 1.25).unwrap();
+
+            let parsed = JwtClaims::parse(claims.to_json()).unwrap();
+            for claims in [claims, parsed] {
+                assert_eq!(claims.integer_claim("auth_time").unwrap(), Some(123));
+                assert_eq!(claims.boolean_claim("email_verified").unwrap(), Some(false));
+                assert_eq!(claims.float_claim("score").unwrap(), Some(1.25));
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_float_claim_rejects_non_finite_without_overwriting() {
+        let mut claims = JwtClaims::new();
+        claims.set_float_claim("score", 1.25).unwrap();
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(matches!(
+                claims.set_float_claim("score", value),
+                Err(JoseError::InvalidJson(_))
+            ));
+            assert_eq!(claims.float_claim("score").unwrap(), Some(1.25));
+        }
+    }
+
+    #[test]
+    fn test_set_json_claim_round_trip() {
+        let mut claims = JwtClaims::parse(r#"{"iss":"issuer","verified_claims":"old"}"#).unwrap();
+        let verified = br#"{"verification":{"evidence":[{"type":"id_document"}]},"claims":{"given_name":"Example"}}"#;
+        claims.set_json_claim("verified_claims", verified).unwrap();
+        claims.set_json_claim("items", "[1, true]").unwrap();
+        claims.set_json_claim("optional", "null").unwrap();
+
+        let mut json = claims.to_json().into_bytes();
+        let parsed = simd_json::to_owned_value(&mut json).unwrap();
+        let expected = simd_json::to_owned_value(&mut verified.to_vec()).unwrap();
+        let items = simd_json::to_owned_value(&mut b"[1, true]".to_vec()).unwrap();
+        assert_eq!(parsed.get_str("iss"), Some("issuer"));
+        assert_eq!(parsed.get("verified_claims"), Some(&expected));
+        assert_eq!(parsed.get("items"), Some(&items));
+        assert!(parsed.get("optional").unwrap().as_null().is_some());
+    }
+
+    #[test]
+    fn test_set_json_claim_rejects_invalid_input_without_overwriting() {
+        let mut claims = JwtClaims::new();
+        claims.set_string_claim("custom", "original").unwrap();
+        for invalid in ["", "{", "true false", "null trailing"] {
+            assert!(matches!(
+                claims.set_json_claim("custom", invalid),
+                Err(JoseError::InvalidJson(_))
+            ));
+            assert_eq!(claims.string_claim("custom"), Some("original"));
+        }
     }
 
     #[test]

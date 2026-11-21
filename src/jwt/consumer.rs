@@ -77,7 +77,7 @@ impl ErrorCode {
     pub const MISCELLANEOUS: ErrorCode = ErrorCode(17);
     /// A claim was present but had an invalid type or value, such as a
     /// nonnumeric or out-of-range `NumericDate` in `exp`, `nbf`, or `iat`.
-    /// Also used by [`JwtClaims::integer_claim`] for malformed custom claims.
+    /// Also used by typed [`JwtClaims`] accessors for malformed custom claims.
     pub const MALFORMED_CLAIM: ErrorCode = ErrorCode(18);
     /// JWE encryption was required but missing. Not produced by the default
     /// claims pipeline (JWE is handled by `JsonWebEncryption` before claims
@@ -932,9 +932,9 @@ impl JwtConsumer<'_> {
     }
 
     fn validate_time_claims(&self, claims: &JwtClaims, errors: &mut Vec<ErrorCode>) {
-        let exp = claims.time_claim("exp");
-        let nbf = claims.time_claim("nbf");
-        let iat = claims.time_claim("iat");
+        let exp = claims.classify_time_claim("exp");
+        let nbf = claims.classify_time_claim("nbf");
+        let iat = claims.classify_time_claim("iat");
 
         // No comparisons require the wall clock when all time claims are
         // absent. Still enforce required claims, in the usual error order.
