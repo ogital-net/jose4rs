@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use crate::{
     base64,
     crypto::{
-        BigNum, DigestAlgorithm, EcCurve, EcKey, EvpPkey, EvpPkeyType, X509Cert, mem::Zeroizing,
+        BigNum, DigestAlgorithm, EcCurve, EcKey, EvpPkey, EvpPkeyType, X509Cert,
+        mem::{Zeroizing, ZeroizingVec},
     },
     error::JoseError,
 };
@@ -398,38 +399,45 @@ impl EcJsonWebKey {
     }
 
     pub(super) fn from_map(value: &impl GetStr) -> Result<Self, JoseError> {
-        // Decode coordinates to raw bytes first so the exact field-octet length
-        // can be enforced (RFC 7518 Section 6.2.1: coordinates MUST be exactly
-        // the field size; a BigNum value alone loses the encoded length).
         let curve = value
             .get("crv")?
             .ok_or_else(|| JoseError::InvalidKey("missing 'crv' parameter".to_string()))?;
         let curve: EcCurve = curve.try_into()?;
-        let coord_len = curve.coordinate_len();
+        let component_len = curve.coordinate_len();
+        let encoded_len = base64::url_encode_size(component_len);
+        let mut scratch = ZeroizingVec::new(Vec::with_capacity(component_len));
 
-        let decode_coord = |key: &str| -> Result<BigNum, JoseError> {
-            let encoded = value
-                .get(key)?
-                .ok_or_else(|| JoseError::InvalidKey(format!("missing '{key}' parameter")))?;
-            let bytes = crate::base64::url_decode(encoded)?;
-            if bytes.len() != coord_len {
-                return Err(JoseError::InvalidKey(format!(
-                    "'{key}' coordinate is {} bytes but {coord_len} are required for {curve:?}",
-                    bytes.len()
-                )));
+        let mut decode_component = |name: &str, encoded: &str| -> Result<BigNum, JoseError> {
+            let invalid_width = || {
+                JoseError::InvalidKey(format!(
+                    "EC '{name}' must encode exactly {component_len} bytes for {curve:?}"
+                ))
+            };
+            if encoded.len() != encoded_len {
+                return Err(invalid_width());
             }
-            Ok(bytes.as_ref().into())
+            scratch.append_with(component_len, |dst| base64::url_decode_append(encoded, dst))?;
+            if scratch.len() != component_len {
+                return Err(invalid_width());
+            }
+            let component = BigNum::from(scratch.as_slice());
+            scratch.truncate(0);
+            Ok(component)
+        };
+        let mut decode_coord = |name: &str| {
+            let encoded = value
+                .get(name)?
+                .ok_or_else(|| JoseError::InvalidKey(format!("missing '{name}' parameter")))?;
+            decode_component(name, encoded)
         };
 
         let x = decode_coord("x")?;
         let y = decode_coord("y")?;
         let d = value
             .get("d")?
-            .map(|encoded| -> Result<BigNum, JoseError> {
-                let bytes = Zeroizing::new(crate::base64::url_decode(encoded)?);
-                Ok(bytes.as_ref().into())
-            })
+            .map(|encoded| decode_component("d", encoded))
             .transpose()?;
+        drop(scratch);
 
         let mut ec_key = EcKey::new(curve);
         let private = d.is_some();

@@ -2048,6 +2048,30 @@ mod tests {
         assert!(JsonWebKey::from_json(valid).is_ok());
     }
 
+    #[test]
+    fn test_ec_private_scalar_requires_fixed_width() {
+        let scalar = base64::url_decode("hauIyknXv6hMuNcy3EiF4EuE6LEVPqBIW94WUAodWDk").unwrap();
+        let mut padded = vec![0];
+        padded.extend_from_slice(&scalar);
+
+        for bytes in [&scalar[1..], &scalar, &padded] {
+            let encoded = base64::url_encode(bytes);
+            let private = std::str::from_utf8(&encoded).unwrap();
+            let json = format!(
+                r#"{{"kty":"EC","crv":"P-256","x":"KejbjRrFQ2RW9UImw57J8kJZzhUvxpxscmwaPZ31WNI","y":"R87oaokXcS0J2EpIB4yCo_6A-pzxpymMOieq2WM_yIY","d":"{private}"}}"#,
+            );
+            let parsed = JsonWebKey::from_json(json);
+            if bytes.len() == 32 {
+                assert!(parsed.is_ok());
+            } else {
+                assert!(matches!(
+                    parsed,
+                    Err(JoseError::InvalidKey(message)) if message.contains("'d'")
+                ));
+            }
+        }
+    }
+
     /// `into_public` strips RSA private material without a JSON round trip:
     /// the result verifies but holds no `d`/CRT members even at
     /// `IncludePrivate`, and keeps the metadata.
