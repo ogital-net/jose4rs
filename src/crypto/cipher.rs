@@ -38,10 +38,6 @@ impl EvpCipherCtx {
         iv: &[u8],
         in_out: &'a mut Vec<u8>,
     ) -> Result<&'a mut [u8], JoseError> {
-        if in_out.is_empty() {
-            return Err(JoseError::new("buffer must not be empty"));
-        }
-
         if key.len() != algorithm.key_len() {
             return Err(JoseError::InvalidKey(format!(
                 "invalid key length '{}', expected '{}'",
@@ -78,17 +74,19 @@ impl EvpCipherCtx {
         #[allow(clippy::cast_sign_loss)]
         unsafe {
             let mut written: std::ffi::c_int = 0;
-            assert!(
-                1 == EVP_EncryptUpdate(
-                    self.as_mut_ptr(),
-                    in_out.as_mut_ptr(),
-                    &raw mut written,
-                    in_out.as_ptr(),
-                    in_out.len().try_into().unwrap()
-                ),
-                "EVP_EncryptUpdate() failed"
-            );
-            in_out.set_len(written as usize);
+            if !in_out.is_empty() {
+                assert!(
+                    1 == EVP_EncryptUpdate(
+                        self.as_mut_ptr(),
+                        in_out.as_mut_ptr(),
+                        &raw mut written,
+                        in_out.as_ptr(),
+                        in_out.len().try_into().unwrap()
+                    ),
+                    "EVP_EncryptUpdate() failed"
+                );
+                in_out.set_len(written as usize);
+            }
             assert!(
                 1 == EVP_EncryptFinal_ex(
                     self.as_mut_ptr(),
@@ -254,7 +252,6 @@ mod tests {
         let algorithm = Algorithm::Aes128Cbc;
         let key = [0; 16];
         let iv = [0; 16];
-        assert!(ctx.encrypt(algorithm, &key, &iv, &mut Vec::new()).is_err());
         assert!(ctx.decrypt(algorithm, &key, &iv, &mut []).is_err());
 
         for (key, iv) in [(&key[..15], &iv[..]), (&key[..], &iv[..15])] {
@@ -272,6 +269,24 @@ mod tests {
             ctx.decrypt(algorithm, &key, &iv, &mut [0; 15]),
             Err(JoseError::InvalidKey(_))
         ));
+    }
+
+    #[test]
+    fn test_cbc_encrypts_empty_plaintext_as_a_padding_block() {
+        let algorithm = Algorithm::Aes128Cbc;
+        let key = [0; 16];
+        let iv = [0; 16];
+        let mut ciphertext = Vec::new();
+        EvpCipherCtx::init()
+            .encrypt(algorithm, &key, &iv, &mut ciphertext)
+            .unwrap();
+        assert_eq!(ciphertext.len(), algorithm.block_len());
+        assert_eq!(
+            EvpCipherCtx::init()
+                .decrypt(algorithm, &key, &iv, &mut ciphertext)
+                .unwrap(),
+            []
+        );
     }
 
     #[test]

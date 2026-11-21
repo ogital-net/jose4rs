@@ -903,7 +903,14 @@ impl<'a> JsonWebSignature<'a> {
         // The payload member is required for a normal (b64) JWS. It may be
         // omitted only by a detached b64=false JWS (RFC 7797), whose raw
         // payload the caller supplies via `set_detached_payload`.
-        let encoded_payload: Option<&[u8]> = value.get_str("payload").map(str::as_bytes);
+        let encoded_payload = value
+            .get("payload")
+            .map(|payload| {
+                payload.as_str().map(str::as_bytes).ok_or_else(|| {
+                    JoseError::MalformedToken("invalid JWS, 'payload' must be a string".into())
+                })
+            })
+            .transpose()?;
         let encoded_signature = value.get_str("signature").map_or_else(
             || {
                 Err(JoseError::MalformedToken(
@@ -1792,6 +1799,36 @@ mod tests {
         let flattened =
             format!(r#"{{"protected":"{protected}","payload":"JC4wMg","signature":"AA"}}"#);
         assert!(JsonWebSignature::from_flattened_json_serialization(&flattened).is_err());
+    }
+
+    #[test]
+    fn test_crit_requires_present_unique_header_names() {
+        for header in [
+            br#"{"alg":"HS256","crit":["b64"]}"#.as_slice(),
+            br#"{"alg":"HS256","crit":["b64","b64"],"b64":true}"#,
+        ] {
+            let protected = base64::url_encode(header);
+            let protected = str::from_utf8(&protected).unwrap();
+            let compact = format!("{protected}.AA.AA");
+            assert!(matches!(
+                JsonWebSignature::from_compact_serialization(&compact),
+                Err(JoseError::InvalidHeader(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn test_flattened_json_rejects_non_string_payload_with_b64_false() {
+        let protected = base64::url_encode(br#"{"alg":"HS256","b64":false,"crit":["b64"]}"#);
+        let protected = str::from_utf8(&protected).unwrap();
+        for payload in ["null", "42", "{}", "[]", "false"] {
+            let flattened =
+                format!(r#"{{"protected":"{protected}","payload":{payload},"signature":"AA"}}"#);
+            assert!(matches!(
+                JsonWebSignature::from_flattened_json_serialization(&flattened),
+                Err(JoseError::MalformedToken(_))
+            ));
+        }
     }
 
     /// b64=false is not representable in compact serialization.

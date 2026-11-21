@@ -116,7 +116,7 @@ pub trait JsonWebStructure<'a, A> {
 }
 
 /// Enforces RFC 7515 Section 4.1.11 / RFC 7516 Section 4.1.11: every name listed in the
-/// `crit` header parameter must be understood and supported. `supported` lists
+/// `crit` header parameter must be present, unique, and supported. `supported` lists
 /// the extension names this implementation handles (e.g. `"b64"` for RFC 7797
 /// in JWS). Any other name in `crit` causes rejection.
 ///
@@ -137,13 +137,26 @@ pub(crate) fn check_crit(
             "JOSE 'crit' header parameter must not be empty".into(),
         ));
     }
-    for name in arr {
+    for (index, name) in arr.iter().enumerate() {
         let name = name.as_str().ok_or_else(|| {
             JoseError::InvalidHeader("JOSE 'crit' entries must be strings".into())
         })?;
         if !supported.contains(&name) {
             return Err(JoseError::InvalidHeader(format!(
                 "unsupported critical header extension '{name}' listed in 'crit'"
+            )));
+        }
+        if header.get(name).is_none() {
+            return Err(JoseError::InvalidHeader(format!(
+                "critical header extension '{name}' is missing"
+            )));
+        }
+        if arr[..index]
+            .iter()
+            .any(|previous| previous.as_str() == Some(name))
+        {
+            return Err(JoseError::InvalidHeader(format!(
+                "duplicate critical header extension '{name}' in 'crit'"
             )));
         }
     }

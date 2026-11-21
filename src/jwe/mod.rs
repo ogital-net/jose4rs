@@ -287,8 +287,10 @@ impl<'a> JsonWebEncryption<'a> {
     ///
     /// Returns an error if the `alg`/`enc` headers are missing or unsupported,
     /// if no plaintext payload has been set, or if key management or content
-    /// encryption fails.
+    /// encryption fails. A failed attempt leaves the payload and headers
+    /// available for retry but invalidates any previous compact serialization.
     pub fn encrypt(&mut self, management_key: &JsonWebKey) -> Result<(), JoseError> {
+        self.invalidate_encryption();
         let key_mgmt_alg = self.get_key_mgmt_alg(true)?;
         let content_enc_alg = self.get_content_enc_alg()?;
 
@@ -296,33 +298,20 @@ impl<'a> JsonWebEncryption<'a> {
             .plaintext
             .ok_or(JoseError::new("missing plaintext payload"))?;
 
-        // If the `zip` header requests DEFLATE, compress the payload first and
-        // repoint `plaintext` at the compressed bytes (appended to the buffer).
-        // Without the `zip` feature any `zip` header is rejected here rather
-        // than silently producing a token the recipient reads as uncompressed.
         #[cfg(feature = "zip")]
-        let plaintext_ref = {
-            let raw = plaintext_ref.get(&self.buffer);
-            match self.maybe_compress(raw)? {
-                std::borrow::Cow::Borrowed(_) => plaintext_ref,
-                std::borrow::Cow::Owned(compressed) => {
-                    let compressed = Zeroizing::new(compressed);
-                    let start = self.buffer.len();
-                    self.buffer.extend_from_slice(&compressed);
-                    let r = BufferRef::new(start, self.buffer.len());
-                    self.plaintext = Some(r);
-                    r
-                }
-            }
+        let compressed = match self.maybe_compress(plaintext_ref.get(&self.buffer))? {
+            std::borrow::Cow::Borrowed(_) => None,
+            std::borrow::Cow::Owned(compressed) => Some(Zeroizing::new(compressed)),
         };
         #[cfg(not(feature = "zip"))]
-        {
+        let compressed: Option<Zeroizing<Box<[u8]>>> = {
             if self.header(HeaderParameter::Zip).is_some() {
                 return Err(JoseError::InvalidAlgorithm(
                     "zip header present but jose4rs was built without the `zip` feature".into(),
                 ));
             }
-        }
+            None
+        };
 
         // Single CSPRNG call for both the random CEK and content IV.
         let cek_len = content_enc_alg.key_len();
@@ -333,7 +322,10 @@ impl<'a> JsonWebEncryption<'a> {
         // Key management: wrap the random CEK. This may also set header
         // parameters (epk, iv, tag, p2s, p2c). ECDH-ES/dir derive their
         // own CEK and ignore the random bytes.
-        let mut headers = self.header.take().ok_or(JoseError::new("missing header"))?;
+        let mut headers = self
+            .header
+            .clone()
+            .ok_or(JoseError::new("missing header"))?;
         let keys = key_mgmt_alg.manage_encrypt(
             management_key,
             content_enc_alg,
@@ -343,14 +335,16 @@ impl<'a> JsonWebEncryption<'a> {
 
         // Serialize header JSON and base64url-encode directly into the buffer.
         let header_json = headers.encode();
-        self.header = Some(headers);
         let iv = &rand_buf[cek_len..cek_len + iv_len];
 
         // For AEAD algorithms (GCM, ChaCha20) the ciphertext is the same
         // length as the plaintext, so we can encrypt directly in the buffer
         // and avoid all intermediate allocations.
         if let Some(aead_alg) = content_enc_alg.aead_algorithm() {
-            let pt_len = plaintext_ref.len();
+            let pt_len = compressed
+                .as_ref()
+                .map_or_else(|| plaintext_ref.len(), |bytes| bytes.len());
+            let output_start = self.buffer.len();
 
             // Write all parts into the buffer in final layout order.
             let encoded_header_ref = self
@@ -372,8 +366,12 @@ impl<'a> JsonWebEncryption<'a> {
 
             // Copy plaintext to the end of the buffer for in-place encryption.
             let ct_start = self.buffer.len();
-            self.buffer
-                .extend_from_within(plaintext_ref.start_idx..plaintext_ref.end_idx);
+            if let Some(compressed) = &compressed {
+                self.buffer.extend_from_slice(compressed);
+            } else {
+                self.buffer
+                    .extend_from_within(plaintext_ref.start_idx..plaintext_ref.end_idx);
+            }
             self.ciphertext = Some(BufferRef::new(ct_start, ct_start + pt_len));
 
             // split_at_mut gives us &[u8] AAD (encoded header) and &mut [u8]
@@ -386,14 +384,20 @@ impl<'a> JsonWebEncryption<'a> {
                 crate::crypto::aead::EvpAeadCtx::init(aead_alg, keys.content_encryption_key());
             let mut tag = [0u8; MAX_TAG_LEN];
             let tag_len = aead_alg.max_tag_len();
-            ctx.encrypt(iv, aad, ct, &mut tag[..tag_len])?;
+            if let Err(err) = ctx.encrypt(iv, aad, ct, &mut tag[..tag_len]) {
+                self.invalidate_encryption();
+                self.buffer.truncate(output_start);
+                return Err(err);
+            }
 
             let tag_start = self.buffer.len();
             self.buffer.extend_from_slice(&tag[..tag_len]);
             self.auth_tag = Some(BufferRef::new(tag_start, self.buffer.len()));
         } else {
             // CBC-HMAC: ciphertext has padding, use the existing allocating path.
-            let plaintext = plaintext_ref.get(&self.buffer);
+            let plaintext = compressed
+                .as_ref()
+                .map_or_else(|| plaintext_ref.get(&self.buffer), |bytes| &bytes[..]);
             let encoded_header = base64::url_encode(header_json.as_bytes());
 
             let parts = content_enc_alg.encrypt(
@@ -426,7 +430,16 @@ impl<'a> JsonWebEncryption<'a> {
             self.auth_tag = Some(BufferRef::new(start, self.buffer.len()));
         }
 
+        self.header = Some(headers);
         Ok(())
+    }
+
+    fn invalidate_encryption(&mut self) {
+        self.encoded_header = None;
+        self.encrypted_key = None;
+        self.iv = None;
+        self.ciphertext = None;
+        self.auth_tag = None;
     }
 
     /// Parses a JWE compact serialization, readying it for decryption.
@@ -604,12 +617,14 @@ impl<'a> JsonWebStructure<'a, KeyManagementAlgorithm> for JsonWebEncryption<'a> 
     }
 
     fn set_payload(&mut self, payload: impl AsRef<[u8]>) {
+        self.invalidate_encryption();
         let start = self.buffer.len();
         self.buffer.extend_from_slice(payload.as_ref());
         self.plaintext = Some(BufferRef::new(start, self.buffer.len()));
     }
 
     fn set_header_value(&mut self, name: impl Into<String>, value: simd_json::owned::Value) {
+        self.invalidate_encryption();
         if let Some(ref mut header) = self.header {
             header.insert(name.into(), value).unwrap();
         } else {
@@ -666,7 +681,8 @@ impl<'a> JsonWebEncryption<'a> {
     /// Produces the JWE compact serialization from the parsed/encrypted state.
     /// Does not require a key -- encryption produces all required parts;
     /// the caller may invoke this on a parsed token to re-serialize it, but not
-    /// after [`payload`](Self::payload) has attempted content decryption.
+    /// after [`payload`](Self::payload) has attempted content decryption or
+    /// after editing the headers or payload without encrypting again.
     ///
     /// # Errors
     ///
@@ -1219,6 +1235,49 @@ mod tests {
     }
 
     #[test]
+    fn reusing_jwe_clears_stale_output_and_allows_encryption_retry() {
+        let wrap_key = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A128Kw)
+            .generate()
+            .unwrap();
+        let direct_key = JsonWebKey::from_json(
+            r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"dir"}"#,
+        )
+        .unwrap();
+
+        for enc in [
+            ContentEncryptionAlgorithm::Aes256Gcm,
+            ContentEncryptionAlgorithm::Aes128CbcHmacSha256,
+        ] {
+            let mut jwe = JsonWebEncryption::new();
+            jwe.set_algorithm(KeyManagementAlgorithm::A128Kw);
+            jwe.set_encryption_method(enc);
+            jwe.set_payload(b"original");
+            jwe.encrypt(&wrap_key).unwrap();
+            let compact = jwe.compact_serialization().unwrap();
+            assert_ne!(compact.split('.').nth(1), Some(""));
+
+            assert!(jwe.encrypt(&direct_key).is_err());
+            assert!(jwe.compact_serialization().is_err());
+            jwe.encrypt(&wrap_key).unwrap();
+            let compact = jwe.compact_serialization().unwrap();
+            let mut parsed = JsonWebEncryption::from_compact_serialization(&compact).unwrap();
+            assert_eq!(parsed.payload(&wrap_key).unwrap(), b"original");
+
+            jwe.set_payload(b"");
+            assert!(jwe.compact_serialization().is_err());
+            jwe.set_algorithm(KeyManagementAlgorithm::Direct);
+            jwe.encrypt(&direct_key).unwrap();
+            let compact = jwe.compact_serialization().unwrap();
+            assert_eq!(compact.split('.').nth(1), Some(""));
+            parsed.set_compact_serialization(&compact).unwrap();
+            assert_eq!(parsed.payload(&direct_key).unwrap(), []);
+
+            jwe.set_header(HeaderParameter::Type, "changed");
+            assert!(jwe.compact_serialization().is_err());
+        }
+    }
+
+    #[test]
     fn rejects_mismatched_jwk_algorithm_on_encrypt_and_decrypt() {
         let matching_key = JsonWebKey::from_json(
             r#"{"kty":"oct","k":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","alg":"A256KW"}"#,
@@ -1340,16 +1399,22 @@ mod tests {
             enc.set_encryption_method(enc_alg);
             enc.set_payload(plaintext);
             enc.enable_default_compression();
-            enc.encrypt(&key).unwrap();
-            // The zip header must be present in the emitted token.
-            assert_eq!(enc.header(HeaderParameter::Zip), Some("DEF"));
-            let compact = enc.compact_serialization().unwrap();
+            let wrong_key = JsonWebKeyGenerator::for_encryption(KeyManagementAlgorithm::A256Kw)
+                .generate()
+                .unwrap();
+            assert!(enc.encrypt(&wrong_key).is_err());
+            assert!(enc.compact_serialization().is_err());
 
             let mut dec = JsonWebEncryption::new();
             dec.set_algorithm_constraints(&constraints);
-            dec.set_compact_serialization(&compact).unwrap();
-            let decrypted = dec.payload(&key).unwrap();
-            assert_eq!(decrypted, plaintext);
+            for _ in 0..2 {
+                enc.encrypt(&key).unwrap();
+                assert_eq!(enc.header(HeaderParameter::Zip), Some("DEF"));
+                assert_eq!(enc.payload(&key).unwrap(), plaintext);
+                let compact = enc.compact_serialization().unwrap();
+                dec.set_compact_serialization(&compact).unwrap();
+                assert_eq!(dec.payload(&key).unwrap(), plaintext);
+            }
         }
     }
 
