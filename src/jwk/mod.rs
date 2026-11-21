@@ -270,9 +270,9 @@ impl GetStr for simd_json::BorrowedValue<'_> {
     }
 }
 
-impl GetStr for &simd_json::OwnedValue {
+impl GetStr for simd_json::OwnedValue {
     fn get(&self, key: &str) -> Result<Option<&str>, JoseError> {
-        ValueObjectAccess::get(*self, key)
+        ValueObjectAccess::get(self, key)
             .map(|value| jwk_string(value, key))
             .transpose()
     }
@@ -388,12 +388,12 @@ impl JsonWebKey {
 
         let jwk = match value.get_str("kty") {
             Some(val) => match val {
-                "RSA" => JsonWebKey::Rsa(RsaJsonWebKey::from_map(value)?),
-                "EC" => JsonWebKey::EllipticCurve(EcJsonWebKey::from_map(value)?),
-                "oct" => JsonWebKey::Oct(OctetSequenceJsonWebKey::from_map(value)?),
-                "OKP" => JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_map(value)?),
+                "RSA" => JsonWebKey::Rsa(RsaJsonWebKey::from_map(&value)?),
+                "EC" => JsonWebKey::EllipticCurve(EcJsonWebKey::from_map(&value)?),
+                "oct" => JsonWebKey::Oct(OctetSequenceJsonWebKey::from_map(&value)?),
+                "OKP" => JsonWebKey::OctetKeyPair(OkpJsonWebKey::from_map(&value)?),
                 #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
-                "AKP" => JsonWebKey::MlDsa(MlDsaJsonWebKey::from_map(value)?),
+                "AKP" => JsonWebKey::MlDsa(MlDsaJsonWebKey::from_map(&value)?),
                 _ => {
                     return Err(JoseError::InvalidJson(
                         "'kty' must be one of 'EC', RSA', 'OKP', 'AKP', or 'oct'".into(),

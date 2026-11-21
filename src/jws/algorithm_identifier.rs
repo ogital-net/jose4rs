@@ -169,6 +169,7 @@ impl AlgorithmIdentifier {
     /// The result is independent of the `boring` feature (which currently
     /// does not expose ML-DSA upstream).
     #[cfg(all(feature = "pq-ml-dsa", feature = "aws-lc"))]
+    #[must_use]
     pub fn ml_dsa_parameter_set_name(&self) -> Option<&'static str> {
         match self {
             AlgorithmIdentifier::MlDsa44 => Some("ML-DSA-44"),

@@ -36,6 +36,7 @@ pub enum MlDsaParameterSet {
 
 impl MlDsaParameterSet {
     /// Returns the JOSE algorithm name (`ML-DSA-44`, `ML-DSA-65`, `ML-DSA-87`).
+    #[must_use]
     pub fn jose_name(self) -> &'static str {
         match self {
             MlDsaParameterSet::MlDsa44 => "ML-DSA-44",
@@ -45,6 +46,7 @@ impl MlDsaParameterSet {
     }
 
     /// The public-key byte length (FIPS 204).
+    #[must_use]
     pub fn public_key_len(self) -> usize {
         match self {
             MlDsaParameterSet::MlDsa44 => 1312,
@@ -54,6 +56,7 @@ impl MlDsaParameterSet {
     }
 
     /// The signature byte length (FIPS 204).
+    #[must_use]
     pub fn signature_len(self) -> usize {
         match self {
             MlDsaParameterSet::MlDsa44 => 2420,
@@ -204,6 +207,7 @@ impl MlDsaJsonWebKey {
     /// through this module's public API, which validates the length up
     /// front (`from_public_bytes`, `from_map`) or derives it from a
     /// backend-generated key (`from_seed`, key generation).
+    #[must_use]
     pub fn parameter_set(&self) -> MlDsaParameterSet {
         // Recover the parameter set by reading the raw public key and
         // matching its length. We use the crypto helper for size.
@@ -225,6 +229,7 @@ impl MlDsaJsonWebKey {
     // one of the MlDsa44/65/87 types), so `get_raw_public_key` always
     // succeeds; the `expect` cannot actually panic.
     #[allow(clippy::missing_panics_doc)]
+    #[must_use]
     pub fn public_key_bytes(&self) -> Box<[u8]> {
         self.evp_pkey
             .get_raw_public_key()
@@ -233,6 +238,7 @@ impl MlDsaJsonWebKey {
 
     /// Returns the 32-byte ML-DSA seed (RFC 9964 Section 4 form), or `None` for a
     /// public-only key.
+    #[must_use]
     pub fn seed_bytes(&self) -> Option<Box<[u8]>> {
         self.evp_pkey.get_ml_dsa_seed()
     }
@@ -248,11 +254,13 @@ impl MlDsaJsonWebKey {
     }
 
     /// Verifies an ML-DSA signature over a message.
+    #[must_use]
     pub fn verify(&self, message: &[u8], signature: &[u8]) -> bool {
         self.evp_pkey.verify_ml_dsa(message, signature)
     }
 
     /// The key ID (`kid`), if set.
+    #[must_use]
     pub fn key_id(&self) -> Option<&str> {
         self.key_id.as_deref()
     }
@@ -263,6 +271,7 @@ impl MlDsaJsonWebKey {
     }
 
     /// The key usage (`use`), if set.
+    #[must_use]
     pub fn key_use(&self) -> Option<super::KeyUse> {
         self.key_use
     }
@@ -276,22 +285,26 @@ impl MlDsaJsonWebKey {
     /// from a certificate. Always `None` for ML-DSA keys loaded from
     /// `JsonWebKey::from_pem` / `from_der`, since AWS-LC does not currently
     /// surface the issuer chain through the `EVP_PKEY_pqdsa_*` path.
+    #[must_use]
     pub fn x5t(&self) -> Option<&str> {
         self.x5t.as_deref()
     }
 
     /// The X.509 certificate SHA-256 thumbprint (`x5t#S256`), if this key was
     /// built from a certificate.
+    #[must_use]
     pub fn x5t_s256(&self) -> Option<&str> {
         self.x5t_s256.as_deref()
     }
 
     /// The algorithm (`alg`) fixed by this key's ML-DSA parameter set.
+    #[must_use]
     pub fn alg(&self) -> Option<&str> {
         Some(self.alg.name())
     }
 
     /// The typed algorithm metadata fixed by this key's ML-DSA parameter set.
+    #[must_use]
     pub fn jwk_algorithm(&self) -> Option<&JwkAlgorithm> {
         Some(&self.alg)
     }
@@ -318,6 +331,7 @@ impl MlDsaJsonWebKey {
     // `EVP_marshal_public_key` always supports; the fallback `unwrap` cannot
     // actually panic.
     #[allow(clippy::missing_panics_doc)]
+    #[must_use]
     pub fn to_der(&self) -> Box<[u8]> {
         match self.evp_pkey.private_key_to_der() {
             Ok(der) => der,
@@ -445,17 +459,19 @@ impl MlDsaJsonWebKey {
     }
 
     /// The JWK key type: always `"AKP"`.
+    #[must_use]
     pub fn key_type(&self) -> &'static str {
         "AKP"
     }
 
     /// The JOSE parameter-set name (`pub` is named by the bound algorithm;
     /// see [`Self::parameter_set`] for the FIPS 204 identifier).
+    #[must_use]
     pub fn curve_name(&self) -> Option<&'static str> {
         Some(self.parameter_set().jose_name())
     }
 
-    pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
+    pub(super) fn from_map(value: &impl GetStr) -> Result<Self, JoseError> {
         let alg = value
             .get("alg")?
             .ok_or_else(|| JoseError::InvalidKey("missing 'alg' parameter".to_string()))?;
@@ -522,6 +538,6 @@ impl TryFrom<BTreeMap<String, String>> for MlDsaJsonWebKey {
     type Error = JoseError;
 
     fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
-        MlDsaJsonWebKey::from_map(value)
+        MlDsaJsonWebKey::from_map(&value)
     }
 }

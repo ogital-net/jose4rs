@@ -78,7 +78,7 @@ impl MlDsaKey {
         }
 
         let mut pkey: *mut EVP_PKEY = ptr::null_mut();
-        let rc = unsafe { EVP_PKEY_keygen(ctx, &mut pkey) };
+        let rc = unsafe { EVP_PKEY_keygen(ctx, &raw mut pkey) };
         unsafe { EVP_PKEY_CTX_free(ctx) };
         match (rc, ptr::NonNull::new(pkey)) {
             (1, Some(pkey)) => Ok(Self(pkey)),
@@ -149,7 +149,7 @@ fn get_raw_bytes(
     getter: unsafe extern "C" fn(*const EVP_PKEY, *mut u8, *mut usize) -> i32,
 ) -> Result<Box<[u8]>, JoseError> {
     let mut len: usize = 0;
-    let rc = unsafe { getter(pkey, ptr::null_mut(), &mut len) };
+    let rc = unsafe { getter(pkey, ptr::null_mut(), &raw mut len) };
     if rc != 1 || len == 0 {
         return Err(JoseError::InvalidKey(format!(
             "EVP_PKEY_get_raw_* size query returned {rc} with len={len}"
@@ -157,7 +157,7 @@ fn get_raw_bytes(
     }
     let mut buf = vec![0u8; len];
     let mut written = len;
-    let rc = unsafe { getter(pkey, buf.as_mut_ptr(), &mut written) };
+    let rc = unsafe { getter(pkey, buf.as_mut_ptr(), &raw mut written) };
     if rc != 1 {
         return Err(JoseError::InvalidKey(
             "EVP_PKEY_get_raw_* read failed".into(),

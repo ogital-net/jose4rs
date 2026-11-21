@@ -477,8 +477,7 @@ impl RsaJsonWebKey {
             .map(|out| Box::from(out.as_slice()))
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
+    pub(super) fn from_map(value: &impl GetStr) -> Result<Self, JoseError> {
         let mut scratch = ZeroizingVec::new(Vec::new());
         let mut decode_param = |key: &str| -> Result<Option<BigNum>, JoseError> {
             value
@@ -549,6 +548,6 @@ impl TryFrom<BTreeMap<String, String>> for RsaJsonWebKey {
     type Error = JoseError;
 
     fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
-        RsaJsonWebKey::from_map(value)
+        RsaJsonWebKey::from_map(&value)
     }
 }

@@ -188,8 +188,7 @@ impl OctetSequenceJsonWebKey {
         crypto_memcmp(&expected, signature)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
+    pub(super) fn from_map(value: &impl GetStr) -> Result<Self, JoseError> {
         let alg = value.get("alg")?.map(str::parse).transpose()?;
 
         let k = match value.get("k")? {
@@ -207,7 +206,7 @@ impl TryFrom<BTreeMap<String, String>> for OctetSequenceJsonWebKey {
     type Error = JoseError;
 
     fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
-        OctetSequenceJsonWebKey::from_map(value)
+        OctetSequenceJsonWebKey::from_map(&value)
     }
 }
 
@@ -229,7 +228,7 @@ mod tests {
 
     #[test]
     fn parses_and_round_trips_jwe_algorithm_metadata() {
-        let jwk = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+        let jwk = OctetSequenceJsonWebKey::from_map(&BTreeMap::from([
             ("kty".into(), "oct".into()),
             (
                 "k".into(),
@@ -254,7 +253,7 @@ mod tests {
 
     #[test]
     fn parses_content_encryption_and_custom_algorithm_metadata() {
-        let content_encryption = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+        let content_encryption = OctetSequenceJsonWebKey::from_map(&BTreeMap::from([
             (
                 "k".into(),
                 "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
@@ -269,7 +268,7 @@ mod tests {
             ))
         );
 
-        let custom = OctetSequenceJsonWebKey::from_map(BTreeMap::from([
+        let custom = OctetSequenceJsonWebKey::from_map(&BTreeMap::from([
             ("k".into(), "AA".into()),
             ("alg".into(), "urn:example:custom-alg".into()),
         ]))

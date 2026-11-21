@@ -397,8 +397,7 @@ impl EcJsonWebKey {
         ec.verify_concatenated(message, digest_alg, signature)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    pub(super) fn from_map(value: impl GetStr) -> Result<Self, JoseError> {
+    pub(super) fn from_map(value: &impl GetStr) -> Result<Self, JoseError> {
         // Decode coordinates to raw bytes first so the exact field-octet length
         // can be enforced (RFC 7518 Section 6.2.1: coordinates MUST be exactly
         // the field size; a BigNum value alone loses the encoded length).
@@ -469,6 +468,6 @@ impl TryFrom<BTreeMap<String, String>> for EcJsonWebKey {
     type Error = JoseError;
 
     fn try_from(value: BTreeMap<String, String>) -> Result<Self, Self::Error> {
-        EcJsonWebKey::from_map(value)
+        EcJsonWebKey::from_map(&value)
     }
 }

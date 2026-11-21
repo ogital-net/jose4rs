@@ -82,7 +82,7 @@ jobs:
       # Lint the default feature set and the full aws-lc add-on set; both must
       # stay warning-free under the workspace pedantic lints.
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo clippy --all-targets --features zip,jwks-https,jwks-https-async -- -D warnings
+      - run: cargo clippy --all-targets --features zip,jwks-https,jwks-https-async,pq-ml-dsa -- -D warnings
 
   docs:
     name: Rustdoc

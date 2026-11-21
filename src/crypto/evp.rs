@@ -672,7 +672,8 @@ impl EvpPkey {
             return None;
         }
         let mut need = 0usize;
-        if 1 != unsafe { EVP_PKEY_get_private_seed(self.as_ptr(), ptr::null_mut(), &mut need) } {
+        if 1 != unsafe { EVP_PKEY_get_private_seed(self.as_ptr(), ptr::null_mut(), &raw mut need) }
+        {
             return None;
         }
         if need != 32 {
@@ -682,12 +683,16 @@ impl EvpPkey {
             return None;
         }
         unsafe {
-            let mut b = Box::<[u8]>::new_uninit_slice(need);
+            let mut seed = Box::<[u8]>::new_uninit_slice(need);
             assert!(
-                1 == EVP_PKEY_get_private_seed(self.as_ptr(), b.as_mut_ptr() as *mut u8, &mut need),
+                1 == EVP_PKEY_get_private_seed(
+                    self.as_ptr(),
+                    seed.as_mut_ptr().cast::<u8>(),
+                    &raw mut need,
+                ),
                 "EVP_PKEY_get_private_seed() failed"
             );
-            Some(b.assume_init())
+            Some(seed.assume_init())
         }
     }
     fn rsaes_init(
